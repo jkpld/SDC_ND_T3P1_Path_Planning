@@ -11,8 +11,10 @@
 #include "Vehicle.h"
 #include <map>
 #include <chrono>
+#include "matplotlibcpp/matplotlibcpp.h"
 
 using namespace std;
+namespace plt = matplotlibcpp;
 
 // for convenience
 using json = nlohmann::json;
@@ -176,6 +178,21 @@ double stop_timer (chrono::high_resolution_clock::time_point &start) {
     return duration;
 };
 
+void update_plot(Vehicle ego, map<int,Vehicle> cars) {
+  plt::clf();
+  plt::plot({ego.state[2]},{0},"ro");
+  for (auto& i : ego.neighborhood) {
+    plt::plot({cars[i].state[2]},{cars[i].state[1]-ego.state[1]},"bx");
+  }
+  plt::plot({0,0},{-50,50},"r--");
+  plt::plot({4,4},{-50,50},"k--");
+  plt::plot({8,8},{-50,50},"k--");
+  plt::plot({12,12},{-50,50},"r--");
+  plt::xlim(-2,14);
+  plt::ylim(-50,50);
+  plt::pause(0.0001);
+}
+
 int main() {
   uWS::Hub h;
 
@@ -249,10 +266,10 @@ int main() {
           if (ego.ID == 999) {
             // initialize if first iteration
             ego.ID = 0;
-            vector<double> s0 ({stop_timer(startTime),car_x,car_y,car_speed*cos(car_yaw),car_speed*sin(car_yaw)});
+            vector<double> s0 ({stop_timer(startTime),car_s,car_d,car_speed*cos(car_yaw),car_speed*sin(car_yaw)});
             ego.state = s0;
           } else {
-            vector<double> s1 ({stop_timer(startTime),car_x,car_y,car_speed*cos(car_yaw),car_speed*sin(car_yaw)});
+            vector<double> s1 ({stop_timer(startTime),car_s,car_d,car_speed*cos(car_yaw),car_speed*sin(car_yaw)});
             ego.pushState(s1);
           }
 
@@ -268,7 +285,7 @@ int main() {
 
           // iterate over each car and update the map of all cars
           for (auto& car : sensor_fusion) {
-            vector<double> s0 ({stop_timer(startTime),car[1],car[2],car[3],car[4]});
+            vector<double> s0 ({stop_timer(startTime),car[5],car[6],car[3],car[4]});
             if (cars.count(car[0]) > 0) {
               // the car already has been added
               cars[car[0]].pushState(s0);
@@ -280,6 +297,8 @@ int main() {
 
           // Update ego's neighborhood
           ego.update_neighborhood(cars);
+
+          update_plot(ego,cars);
 
           for (auto i : ego.neighborhood) {
             cout << i << ", ";
