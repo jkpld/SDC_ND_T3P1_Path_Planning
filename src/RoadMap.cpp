@@ -279,7 +279,7 @@ vector<vector<double>> RoadMap::get_waypoints_as_vector() {
 
 }
 
-vector<vector<double>> RoadMap::get_waypoints() {
+vector<MatrixXd> RoadMap::get_waypoints() {
   vector<MatrixXd> wp;
   wp.push_back(wp_r);
   wp.push_back(wp_n);

@@ -10,11 +10,10 @@
 #include "json.hpp"
 #include "Vehicle.h"
 #include <map>
-#include "matplotlibcpp/matplotlibcpp.h"
 #include "RoadMap.h"
+#include "VisualDebugger.h"
 
 using namespace std;
-namespace plt = matplotlibcpp;
 
 // for convenience
 using json = nlohmann::json;
@@ -49,82 +48,14 @@ double stop_timer (chrono::high_resolution_clock::time_point &start) {
     return duration;
 };
 
-void draw_car(Vehicle& car, RoadMap& road, bool is_ego, int id = 0) {
-
-  // auto s = road.Cartesian_to_Frenet(car.state);
-  auto s = car.state;
-  string mark = (is_ego) ? "ro" : "bs";
-  plt::plot({s[2]},{s[1]},mark);
-  plt::plot({s[2],s[2]+s[4]/2}, {s[1],s[1]+s[3]/2}, "b-");
-  plt::plot({s[2],s[2]+s[6]/5}, {s[1],s[1]+s[5]/5}, "k-");
-
-  double w = 1;
-  double h = 2.4;
-
-  mark = (is_ego) ? "r-" : "b-";
-
-  vector<double> vrt_x = {-w, -w, w, w, -w};
-  vector<double> vrt_y = {-h, h, h, -h, -h};
-
-  double theta = atan2(s[4],s[3]);
-  for (int i = 0; i<5; i++) {
-    auto tx = vrt_x[i];
-    auto ty = vrt_y[i];
-    vrt_x[i] = tx*cos(theta) + ty*sin(theta) + s[2];
-    vrt_y[i] = -tx*sin(theta) + ty*cos(theta) + s[1];
-  }
-
-  plt::plot( vrt_x, vrt_y, mark);
-
-  if (is_ego) {
-    plt::annotate("ego", s[2],s[1]);
-  } else {
-    plt::annotate(to_string(id), s[2],s[1]);
-  }
-
-  s = road.Cartesian_to_Frenet(car.state);
-  auto traj = car.generate_predicted_trajectory(s);
-  vector<double> traj_x;
-  vector<double> traj_y;
-  for (auto& i : traj) {
-    // auto s = road.Cartesian_to_Frenet(i);
-    auto s = road.Frenet_to_Cartesian(i);
-    // auto s = i;
-    traj_x.push_back(s[2]);
-    traj_y.push_back(s[1]);
-    // cout << s[2] << ", " << s[1] << endl;
-  }
-  // cout << endl;
-  plt::plot(traj_x, traj_y, "g-");
-}
-
-void update_plot(Vehicle ego, map<int,Vehicle>& cars, RoadMap& road) {
-  plt::clf();
-
-  // auto ego_sf = road.Cartesian_to_Frenet(ego.state);
-  auto ego_sf = ego.state;
-  draw_car(ego, road, true);
-
-  for (auto& i : ego.neighborhood) {
-    draw_car(cars[i], road, false, i);
-  }
-
-  // draw lanes
-  // plt::plot({0,0},{-50+ego_sf[1],50+ego_sf[1]},"r--");
-  // plt::plot({4,4},{-50+ego_sf[1],50+ego_sf[1]},"k--");
-  // plt::plot({8,8},{-50+ego_sf[1],50+ego_sf[1]},"k--");
-  // plt::plot({12,12},{-50+ego_sf[1],50+ego_sf[1]},"r--");
-  plt::xlim(-50+ego_sf[2],50+ego_sf[2]);
-  plt::ylim(-50+ego_sf[1],50+ego_sf[1]);
-  // plt::xlim(-10,22);
-  plt::pause(0.0001);
-}
+VisualDebugger plotter;
 
 int main() {
   uWS::Hub h;
 
   // Initialize road
   RoadMap road = RoadMap("../data/highway_map.csv");
+  plotter.CordSys = VisualDebugger::FRENET;
 
   map<int, Vehicle> cars;
   auto startTime = start_timer();
@@ -161,8 +92,6 @@ int main() {
           car_yaw = deg2rad(car_yaw);
           car_speed = car_speed*0.44704;
 
-          cout << "s_give : " << car_s << endl;
-
           // Update ego car, initialize if first iteration
           if (ego.ID == 999) {
             ego.ID = 0;
@@ -197,7 +126,8 @@ int main() {
           // Update ego's neighborhood
           ego.update_neighborhood(cars);
 
-          update_plot(ego,cars,road);
+          plotter.update(ego,cars,road);
+          // update_plot(ego,cars,road);
 
           // for (auto i : ego.neighborhood) {
           //   cout << i << ", ";
