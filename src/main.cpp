@@ -10,8 +10,8 @@
 #include "json.hpp"
 #include "Vehicle.h"
 #include <map>
-#include <chrono>
 #include "matplotlibcpp/matplotlibcpp.h"
+#include "RoadMap.h"
 
 using namespace std;
 namespace plt = matplotlibcpp;
@@ -39,135 +39,6 @@ string hasData(string s) {
   return "";
 }
 
-double distance(double x1, double y1, double x2, double y2)
-{
-	return sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1));
-}
-int ClosestWaypoint(double x, double y, const vector<double> &maps_x, const vector<double> &maps_y)
-{
-
-	double closestLen = 100000; //large number
-	int closestWaypoint = 0;
-
-	for(int i = 0; i < maps_x.size(); i++)
-	{
-		double map_x = maps_x[i];
-		double map_y = maps_y[i];
-		double dist = distance(x,y,map_x,map_y);
-		if(dist < closestLen)
-		{
-			closestLen = dist;
-			closestWaypoint = i;
-		}
-
-	}
-
-	return closestWaypoint;
-
-}
-
-int NextWaypoint(double x, double y, double theta, const vector<double> &maps_x, const vector<double> &maps_y)
-{
-
-	int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
-
-	double map_x = maps_x[closestWaypoint];
-	double map_y = maps_y[closestWaypoint];
-
-	double heading = atan2((map_y-y),(map_x-x));
-
-	double angle = fabs(theta-heading);
-  angle = min(2*pi() - angle, angle);
-
-  if(angle > pi()/4)
-  {
-    closestWaypoint++;
-  if (closestWaypoint == maps_x.size())
-  {
-    closestWaypoint = 0;
-  }
-  }
-
-  return closestWaypoint;
-}
-
-// Transform from Cartesian x,y coordinates to Frenet s,d coordinates
-vector<double> getFrenet(double x, double y, double theta, const vector<double> &maps_x, const vector<double> &maps_y)
-{
-	int next_wp = NextWaypoint(x,y, theta, maps_x,maps_y);
-
-	int prev_wp;
-	prev_wp = next_wp-1;
-	if(next_wp == 0)
-	{
-		prev_wp  = maps_x.size()-1;
-	}
-
-	double n_x = maps_x[next_wp]-maps_x[prev_wp];
-	double n_y = maps_y[next_wp]-maps_y[prev_wp];
-	double x_x = x - maps_x[prev_wp];
-	double x_y = y - maps_y[prev_wp];
-
-	// find the projection of x onto n
-	double proj_norm = (x_x*n_x+x_y*n_y)/(n_x*n_x+n_y*n_y);
-	double proj_x = proj_norm*n_x;
-	double proj_y = proj_norm*n_y;
-
-	double frenet_d = distance(x_x,x_y,proj_x,proj_y);
-
-	//see if d value is positive or negative by comparing it to a center point
-
-	double center_x = 1000-maps_x[prev_wp];
-	double center_y = 2000-maps_y[prev_wp];
-	double centerToPos = distance(center_x,center_y,x_x,x_y);
-	double centerToRef = distance(center_x,center_y,proj_x,proj_y);
-
-	if(centerToPos <= centerToRef)
-	{
-		frenet_d *= -1;
-	}
-
-	// calculate s value
-	double frenet_s = 0;
-	for(int i = 0; i < prev_wp; i++)
-	{
-		frenet_s += distance(maps_x[i],maps_y[i],maps_x[i+1],maps_y[i+1]);
-	}
-
-	frenet_s += distance(0,0,proj_x,proj_y);
-
-	return {frenet_s,frenet_d};
-
-}
-
-// Transform from Frenet s,d coordinates to Cartesian x,y
-vector<double> getXY(double s, double d, const vector<double> &maps_s, const vector<double> &maps_x, const vector<double> &maps_y)
-{
-	int prev_wp = -1;
-
-	while(s > maps_s[prev_wp+1] && (prev_wp < (int)(maps_s.size()-1) ))
-	{
-		prev_wp++;
-	}
-
-	int wp2 = (prev_wp+1)%maps_x.size();
-
-	double heading = atan2((maps_y[wp2]-maps_y[prev_wp]),(maps_x[wp2]-maps_x[prev_wp]));
-	// the x,y,s along the segment
-	double seg_s = (s-maps_s[prev_wp]);
-
-	double seg_x = maps_x[prev_wp]+seg_s*cos(heading);
-	double seg_y = maps_y[prev_wp]+seg_s*sin(heading);
-
-	double perp_heading = heading-pi()/2;
-
-	double x = seg_x + d*cos(perp_heading);
-	double y = seg_y + d*sin(perp_heading);
-
-	return {x,y};
-
-}
-
 // Functions for timing
 chrono::high_resolution_clock::time_point start_timer() {
     return chrono::high_resolution_clock::now();
@@ -178,62 +49,89 @@ double stop_timer (chrono::high_resolution_clock::time_point &start) {
     return duration;
 };
 
-void update_plot(Vehicle ego, map<int,Vehicle> cars) {
-  plt::clf();
-  plt::plot({ego.state[2]},{0},"ro");
-  for (auto& i : ego.neighborhood) {
-    plt::plot({cars[i].state[2]},{cars[i].state[1]-ego.state[1]},"bx");
+void draw_car(Vehicle& car, RoadMap& road, bool is_ego, int id = 0) {
+
+  // auto s = road.Cartesian_to_Frenet(car.state);
+  auto s = car.state;
+  string mark = (is_ego) ? "ro" : "bs";
+  plt::plot({s[2]},{s[1]},mark);
+  plt::plot({s[2],s[2]+s[4]/2}, {s[1],s[1]+s[3]/2}, "b-");
+  plt::plot({s[2],s[2]+s[6]/5}, {s[1],s[1]+s[5]/5}, "k-");
+
+  double w = 1;
+  double h = 2.4;
+
+  mark = (is_ego) ? "r-" : "b-";
+
+  vector<double> vrt_x = {-w, -w, w, w, -w};
+  vector<double> vrt_y = {-h, h, h, -h, -h};
+
+  double theta = atan2(s[4],s[3]);
+  for (int i = 0; i<5; i++) {
+    auto tx = vrt_x[i];
+    auto ty = vrt_y[i];
+    vrt_x[i] = tx*cos(theta) + ty*sin(theta) + s[2];
+    vrt_y[i] = -tx*sin(theta) + ty*cos(theta) + s[1];
   }
-  plt::plot({0,0},{-50,50},"r--");
-  plt::plot({4,4},{-50,50},"k--");
-  plt::plot({8,8},{-50,50},"k--");
-  plt::plot({12,12},{-50,50},"r--");
-  plt::xlim(-2,14);
-  plt::ylim(-50,50);
+
+  plt::plot( vrt_x, vrt_y, mark);
+
+  if (is_ego) {
+    plt::annotate("ego", s[2],s[1]);
+  } else {
+    plt::annotate(to_string(id), s[2],s[1]);
+  }
+
+  s = road.Cartesian_to_Frenet(car.state);
+  auto traj = car.generate_predicted_trajectory(s);
+  vector<double> traj_x;
+  vector<double> traj_y;
+  for (auto& i : traj) {
+    // auto s = road.Cartesian_to_Frenet(i);
+    auto s = road.Frenet_to_Cartesian(i);
+    // auto s = i;
+    traj_x.push_back(s[2]);
+    traj_y.push_back(s[1]);
+    // cout << s[2] << ", " << s[1] << endl;
+  }
+  // cout << endl;
+  plt::plot(traj_x, traj_y, "g-");
+}
+
+void update_plot(Vehicle ego, map<int,Vehicle>& cars, RoadMap& road) {
+  plt::clf();
+
+  // auto ego_sf = road.Cartesian_to_Frenet(ego.state);
+  auto ego_sf = ego.state;
+  draw_car(ego, road, true);
+
+  for (auto& i : ego.neighborhood) {
+    draw_car(cars[i], road, false, i);
+  }
+
+  // draw lanes
+  // plt::plot({0,0},{-50+ego_sf[1],50+ego_sf[1]},"r--");
+  // plt::plot({4,4},{-50+ego_sf[1],50+ego_sf[1]},"k--");
+  // plt::plot({8,8},{-50+ego_sf[1],50+ego_sf[1]},"k--");
+  // plt::plot({12,12},{-50+ego_sf[1],50+ego_sf[1]},"r--");
+  plt::xlim(-50+ego_sf[2],50+ego_sf[2]);
+  plt::ylim(-50+ego_sf[1],50+ego_sf[1]);
+  // plt::xlim(-10,22);
   plt::pause(0.0001);
 }
 
 int main() {
   uWS::Hub h;
 
-  // Load up map values for waypoint's x,y,s and d normalized normal vectors
-  vector<double> map_waypoints_x;
-  vector<double> map_waypoints_y;
-  vector<double> map_waypoints_s;
-  vector<double> map_waypoints_dx;
-  vector<double> map_waypoints_dy;
+  // Initialize road
+  RoadMap road = RoadMap("../data/highway_map.csv");
+
   map<int, Vehicle> cars;
   auto startTime = start_timer();
   Vehicle ego = Vehicle();
 
-  // Waypoint map to read from
-  string map_file_ = "../data/highway_map.csv";
-  // The max s value before wrapping around the track back to 0
-  double max_s = 6945.554;
 
-  ifstream in_map_(map_file_.c_str(), ifstream::in);
-
-  string line;
-  while (getline(in_map_, line)) {
-  	istringstream iss(line);
-  	double x;
-  	double y;
-  	float s;
-  	float d_x;
-  	float d_y;
-  	iss >> x;
-  	iss >> y;
-  	iss >> s;
-  	iss >> d_x;
-  	iss >> d_y;
-  	map_waypoints_x.push_back(x);
-  	map_waypoints_y.push_back(y);
-  	map_waypoints_s.push_back(s);
-  	map_waypoints_dx.push_back(d_x);
-  	map_waypoints_dy.push_back(d_y);
-  }
-
-  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy,&cars,&ego,&startTime](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&road, &cars, &ego, &startTime](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -261,16 +159,18 @@ int main() {
         	double car_speed = j[1]["speed"];
 
           car_yaw = deg2rad(car_yaw);
+          car_speed = car_speed*0.44704;
 
-          // Update ego car
+          cout << "s_give : " << car_s << endl;
+
+          // Update ego car, initialize if first iteration
           if (ego.ID == 999) {
-            // initialize if first iteration
             ego.ID = 0;
-            vector<double> s0 ({stop_timer(startTime),car_s,car_d,car_speed*cos(car_yaw),car_speed*sin(car_yaw)});
-            ego.state = s0;
+            vector<double> car_state ({stop_timer(startTime), car_x, car_y, car_speed*cos(car_yaw), car_speed*sin(car_yaw), 0, 0});
+            ego.state = car_state;
           } else {
-            vector<double> s1 ({stop_timer(startTime),car_s,car_d,car_speed*cos(car_yaw),car_speed*sin(car_yaw)});
-            ego.pushState(s1);
+            vector<double> car_state ({stop_timer(startTime), car_x, car_y, car_speed*cos(car_yaw), car_speed*sin(car_yaw)});
+            ego.pushState(car_state);
           }
 
         	// Previous path data given to the Planner
@@ -285,25 +185,24 @@ int main() {
 
           // iterate over each car and update the map of all cars
           for (auto& car : sensor_fusion) {
-            vector<double> s0 ({stop_timer(startTime),car[5],car[6],car[3],car[4]});
-            if (cars.count(car[0]) > 0) {
-              // the car already has been added
-              cars[car[0]].pushState(s0);
+            vector<double> car_state ({stop_timer(startTime), car[1], car[2], car[3], car[4]});
+            if (cars.count(car[0]) > 0) { // the car already has been added
+              cars[car[0]].pushState(car_state);
             }
             else {
-              cars[car[0]] = Vehicle(car[0],s0);
+              cars[car[0]] = Vehicle(car[0],car_state);
             }
           }
 
           // Update ego's neighborhood
           ego.update_neighborhood(cars);
 
-          update_plot(ego,cars);
+          update_plot(ego,cars,road);
 
-          for (auto i : ego.neighborhood) {
-            cout << i << ", ";
-          }
-          cout << endl;
+          // for (auto i : ego.neighborhood) {
+          //   cout << i << ", ";
+          // }
+          // cout << endl;
 
         	json msgJson;
 

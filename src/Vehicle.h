@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <map>
+#include <iostream>
 #include "Eigen-3.3/Eigen/Core"
 
 using namespace std;
@@ -47,6 +48,9 @@ public:
 
   // Predict where the car will be in T sec from current state
   vector<double> predict(double T);
+  vector<double> predict(double T, vector<double> state);
+  vector<vector<double>> generate_predicted_trajectory();
+  vector<vector<double>> generate_predicted_trajectory(vector<double> state);
 
   // Update list of cars in neighborhood
   void update_neighborhood(map<int, Vehicle>&);

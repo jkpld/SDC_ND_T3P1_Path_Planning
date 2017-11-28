@@ -1,6 +1,6 @@
 #include "Vehicle.h"
 
-const double NEIGHBORHOOD_RANGE2 = 10*10;
+const double NEIGHBORHOOD_RANGE2 = 20*20;
 const double TIME_HORIZON = 1;
 
 Vehicle::Vehicle() {
@@ -21,7 +21,7 @@ Vehicle::~Vehicle() {}
 void Vehicle::pushState(vector<double> sm1) {
   double dt = (sm1[0] - state[0])/1000.0;
 
-  if (dt > 1) {
+  if (dt > 0.2) {
     // If the previous state is very old, then reinitialize the state
     for (int i=0; i<5; i++) {
       state[i] = sm1[i];
@@ -49,6 +49,31 @@ vector<double> Vehicle::predict(double T) {
   s[3] = state[3] + state[5]*T;
   s[4] = state[4] + state[6]*T;
   return s;
+}
+
+vector<double> Vehicle::predict(double T, vector<double> state) {
+  vector<double> s (state);
+  s[0] = state[0] + T;
+  s[1] = state[1] + state[3]*T + state[5]*T*T/2;
+  s[2] = state[2] + state[4]*T + state[6]*T*T/2;
+  s[3] = state[3] + state[5]*T;
+  s[4] = state[4] + state[6]*T;
+  return s;
+}
+
+vector<vector<double>> Vehicle::generate_predicted_trajectory() {
+  vector<vector<double>> states;
+  for (double dt = 0; dt <= TIME_HORIZON; dt += TIME_HORIZON/5.0) {
+    states.push_back(this->predict(dt));
+  }
+  return states;
+}
+vector<vector<double>> Vehicle::generate_predicted_trajectory(vector<double> state_in) {
+  vector<vector<double>> states;
+  for (double dt = 0; dt <= TIME_HORIZON; dt += TIME_HORIZON/5.0) {
+    states.push_back(this->predict(dt, state_in));
+  }
+  return states;
 }
 
 void Vehicle::update_neighborhood(map<int,Vehicle>& cars) {
