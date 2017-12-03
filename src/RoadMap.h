@@ -47,12 +47,13 @@ private:
 
     output : { Matrix2d C2F, Matrix2d F2C }
   */
-  vector<Matrix2d> ComputeTransformMatrices(int wp0_idx, int wp1_idx, double dist_along_path);
+  vector<Matrix2d> ComputeTransformMatrices(int wp0_idx, int wp1_idx, VectorXd dist_along_path);
 
 public:
 
   double lane_width = 4; // [m]
 
+  RoadMap();
   RoadMap(string map_file);
   virtual ~RoadMap();
 

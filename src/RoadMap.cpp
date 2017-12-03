@@ -1,5 +1,6 @@
 #include "RoadMap.h"
 
+RoadMap::RoadMap() {};
 RoadMap::RoadMap(string map_file) {
   LoadWaypoints(map_file);
 }
@@ -71,15 +72,14 @@ int RoadMap::NextWaypoint(double x, double y, double theta) {
 
 	int closestWaypoint = ClosestWaypoint(x,y);
 
-  auto m_x = wp_r(closestWaypoint,0);
-  auto m_y = wp_r(closestWaypoint,1);
+  Vector2d wp0 = wp_r.row(closestWaypoint);
+  Vector2d wp0n = wp_n.row(closestWaypoint);
+  Vector2d wp0t;
+  Vector2d r;
+  wp0t << -wp0n(1), wp0n(0);
+  r << x, y;
 
-	double heading = atan2((m_y-y),(m_x-x));
-
-	double angle = fabs(theta-heading);
-  angle = min(2*M_PI - angle, angle);
-
-  if(angle > M_PI/4)
+  if ((r-wp0).dot(wp0t) > 0)
   {
     closestWaypoint++;
     if (closestWaypoint == num_wp)
@@ -88,12 +88,29 @@ int RoadMap::NextWaypoint(double x, double y, double theta) {
     }
   }
 
+  // auto m_x = wp_r(closestWaypoint,0);
+  // auto m_y = wp_r(closestWaypoint,1);
+  //
+	// double heading = atan2((m_y-y),(m_x-x));
+  //
+	// double angle = fabs(theta-heading);
+  // angle = min(2*M_PI - angle, angle);
+  //
+  // if(angle > M_PI/4)
+  // {
+  //   closestWaypoint++;
+  //   if (closestWaypoint == num_wp)
+  //   {
+  //     closestWaypoint = 0;
+  //   }
+  // }
+
   // cout << "Nearest Waypoint : " << wp_r(closestWaypoint,0) << ", " << wp_r(closestWaypoint,1) << " : idx = " << closestWaypoint << endl << endl;
 
   return closestWaypoint;
 }
 
-vector<Matrix2d> RoadMap::ComputeTransformMatrices(int wp0i, int wp1i, double dist_along_path = 0) {
+vector<Matrix2d> RoadMap::ComputeTransformMatrices(int wp0i, int wp1i, VectorXd dist_along_path) {
   Vector2d wp0 = wp_r.row(wp0i);
   Vector2d wp1 = wp_r.row(wp1i);
   Vector2d wp0n = wp_n.row(wp0i);
@@ -108,9 +125,22 @@ vector<Matrix2d> RoadMap::ComputeTransformMatrices(int wp0i, int wp1i, double di
   d_uv << s_uv(1), -s_uv(0);
 
   // d unit vector
-  // double frac = (BETTER_FRENET_APPROX) ? dist_along_path/d : 0.5;
+  // double frac = 0.5;
+  // if (dist_along_path.size() == 1) {
+  //   frac = dist_along_path(0) / d;
+  //
+  //   // cout << "F2C : " << frac << " , i0 = " << wp0i << endl;
+  // } else if (dist_along_path.size() == 2) {
+  //   frac = dist_along_path.dot(s_uv) / d;
+  //   if (frac < 0 || frac > 1)
+  //     cout << "  C2F : " << frac << " , i0 = " << wp0i << endl;
+  // }
+  //
+  // frac = (frac > 1) ? 1.0 : frac;
+  //
   // Vector2d d_uv = (frac * wp1n + (1.0 - frac) * wp0n);
   // d_uv /= d_uv.norm();
+  // s_uv << -d_uv(1), d_uv(0);
 
   Matrix2d C2F, F2C;
   C2F << s_uv.transpose(), d_uv.transpose();
@@ -132,7 +162,8 @@ vector<double> RoadMap::Frenet_to_Cartesian(vector<double> fstate) {
   vf << fstate[3], fstate[4]; // velocity, frenet
   af << fstate[5], fstate[6]; // acceleration, frenet
 
-  double dist_along_path = rf(0);
+  VectorXd dist_along_path(1);
+  dist_along_path << rf(0);
   auto transMat = ComputeTransformMatrices(wp0i, wp1i, dist_along_path);
   auto F2C = transMat[1];
 
@@ -160,6 +191,18 @@ vector<double> RoadMap::Cartesian_to_Frenet(vector<double> state) {
 	int wp1i = NextWaypoint(state[1], state[2], theta);
   int wp0i = (wp1i == 0) ? num_wp - 1 : wp1i - 1;
 
+  // Vector2d wp0 = wp_r.row(wp0i);
+  // Vector2d wp1 = wp_r.row(wp1i);
+  // Vector2d wp0n = wp_n.row(wp0i);
+  // Vector2d wp1n = wp_n.row(wp1i);
+  // Vector2d wp0t, wp1t;
+  // wp0t << -wp0n(1), wp0n(0);
+  // wp1t << -wp1n(1), wp1n(0);
+
+  // Vector2d s_uv = wp1 - wp0; // vector between waypoints
+  // double d = s_uv.norm(); // distance between waypoints
+  // s_uv /= d; // unit vector between the two waypoints
+
   // cartesian vectors
   Vector2d r, v, a, r0;
   r << state[1], state[2]; // location, cartesian
@@ -168,7 +211,15 @@ vector<double> RoadMap::Cartesian_to_Frenet(vector<double> state) {
   r0 = wp_r.row(wp0i);
   r = r - r0; // location relative to wp0, cartesian
 
-  double dist_along_path = r.norm();
+  // auto u0 = (r - wp0).dot(wp0t) * wp0t;
+  // auto u1 = (r - wp1).dot(wp1t) * wp1t + wp1 - wp0;
+  // auto u = (u0 + u1)/2;
+
+  // auto v0 = u.dot(s_uv) * s_uv;
+
+  VectorXd dist_along_path(2);
+  // dist_along_path << u(0), u(1);
+  // double dist_along_path = 0;
   auto transMat = ComputeTransformMatrices(wp0i, wp1i, dist_along_path);
   auto C2F = transMat[0];
 
