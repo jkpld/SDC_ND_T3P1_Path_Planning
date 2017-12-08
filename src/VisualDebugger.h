@@ -35,12 +35,12 @@ public:
 
     // set axis limits
     if (CordSys == VisualDebugger::CARTESIAN) {
-      auto ego_sf = ego.state;
+      auto ego_sf = road.Frenet_to_Cartesian(ego.state);
       plt::xlim(-50+ego_sf[1],50+ego_sf[1]);
       plt::ylim(-50+ego_sf[2],50+ego_sf[2]);
     } else {
 
-      auto ego_sf = road.Cartesian_to_Frenet(ego.state);
+      auto ego_sf = ego.state;
       plt::ylim(-3*road.lane_width,7*road.lane_width);
       plt::xlim(-50+ego_sf[1],50+ego_sf[1]);
     }
@@ -63,11 +63,21 @@ public:
           vx.push_back(line(j,0));
           vy.push_back(line(j,1));
         }
-
-
         string mark = (i==0 || i==3) ? ((i==0) ? "y-" : "k-") : "k--";
-
         plt::plot(vx,vy,mark);
+      }
+
+      auto start = wp_r - 0.5*road.lane_width*wp_n;
+      auto stop = wp_r + 3.5*road.lane_width*wp_n;
+
+      for (int i=0; i<wp_r.rows(); ++i) {
+        vector<double> x;
+        vector<double> y;
+        x.push_back(start(i,0));
+        x.push_back(stop(i,0));
+        y.push_back(start(i,1));
+        y.push_back(stop(i,1));
+        plt::plot(x,y,"k-");
       }
 
     } else {
@@ -89,8 +99,8 @@ public:
 
     auto s = car.state;
 
-    if (CordSys == VisualDebugger::FRENET) {
-      s = road.Cartesian_to_Frenet(car.state);
+    if (CordSys == VisualDebugger::CARTESIAN) {
+      s = road.Frenet_to_Cartesian(car.state);
     }
 
     string mark = (is_ego) ? "ro" : "bs";
@@ -123,7 +133,8 @@ public:
     }
 
     // Compute te cars predicted trajectory in Frenet coordinates
-    s = road.Cartesian_to_Frenet(car.state);
+    // s = road.Cartesian_to_Frenet(car.state);
+    s = car.state;
     auto traj = car.generate_predicted_trajectory(s);
 
     vector<double> traj_x;

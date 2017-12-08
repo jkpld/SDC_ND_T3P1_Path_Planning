@@ -20,6 +20,7 @@ public:
   vector<double> y;
 
   // Construct the pchip interpolator
+  pchip() {};
   pchip(vector<double> xpts, vector<double> ypts) : x(xpts), y(ypts) {
 
     // Array size

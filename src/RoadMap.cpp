@@ -1,5 +1,6 @@
 #include "RoadMap.h"
 
+
 RoadMap::RoadMap() {};
 RoadMap::RoadMap(string map_file) {
   LoadWaypoints(map_file);
@@ -33,8 +34,8 @@ void RoadMap::LoadWaypoints(string map_file) {
   	mx.push_back(x);
   	my.push_back(y);
   	ms.push_back(s);
-  	mdx.push_back(dx);
-  	mdy.push_back(dy);
+    mdx.push_back(dx);
+    mdy.push_back(dy);
   }
 
   // Number of waypoints
@@ -50,6 +51,23 @@ void RoadMap::LoadWaypoints(string map_file) {
     wp_n.row(i) << mdx[i], mdy[i];
     wp_s(i) = ms[i];
   }
+
+  // Make vectors cyclic
+  mx.insert(mx.begin(), mx.back());
+  my.insert(my.begin(), my.back());
+  ms.insert(ms.begin(), ms.back()-max_s);
+
+  mx.push_back(mx[0]);
+  my.push_back(my[0]);
+  ms.push_back(max_s);
+  mx.push_back(mx[1]);
+  my.push_back(my[1]);
+  ms.push_back(max_s+ms[1]);
+
+  // Create two peicewise continuous hermite spline interplantes using s for the
+  // independent variable and x/y as the dependent varaibles
+  x_road = pchip(ms,mx);
+  y_road = pchip(ms,my);
 }
 
 int RoadMap::ClosestWaypoint(double x, double y) {
@@ -152,35 +170,48 @@ vector<Matrix2d> RoadMap::ComputeTransformMatrices(int wp0i, int wp1i, VectorXd 
 // Transform from Frenet s,d coordinates to Cartesian x,y coordinates
 vector<double> RoadMap::Frenet_to_Cartesian(vector<double> fstate) {
 
-  int wp0i = -1;
-	while(fstate[1] > wp_s(wp0i+1) && wp0i < num_wp-1) wp0i++;
-	int wp1i = (wp0i+1) % num_wp;
+  // get x, x', y, y' of the road center line for the current s location
+  int idx = -1;
+  vector<double> x_dat = x_road.evaluate(fstate[1], &idx);
+  vector<double> y_dat = y_road.evaluate(fstate[1], &idx);
+
+  // x-y location of road center line
+  Vector2d r;
+  r << x_dat[0], y_dat[0];
+
+  // road tangent vector
+  Vector2d t;
+  t << x_dat[1], y_dat[1];
+  t /= t.norm();
+
+  // road normal vector
+  Vector2d n;
+  n << t(1), -t(0);
+
+  // x-y location of car
+  r += fstate[2]*n;
 
   // frenet vectors
-  Vector2d rf, vf, af;
-  rf << fstate[1]-wp_s(wp0i), fstate[2]; // location relative to wp0, frenet
+  Vector2d vf, af;
   vf << fstate[3], fstate[4]; // velocity, frenet
   af << fstate[5], fstate[6]; // acceleration, frenet
 
-  VectorXd dist_along_path(1);
-  dist_along_path << rf(0);
-  auto transMat = ComputeTransformMatrices(wp0i, wp1i, dist_along_path);
-  auto F2C = transMat[1];
+  Matrix2d C2F, F2C;
+  C2F << t.transpose(), n.transpose();
+  F2C  = C2F.inverse();
 
-  auto r = F2C*rf;
   auto v = F2C*vf;
   auto a = F2C*af;
 
   vector<double> state (fstate);
-  state[1] = r[0] + wp_r(wp0i,0);
-  state[2] = r[1] + wp_r(wp0i,1);
+  state[1] = r[0];
+  state[2] = r[1];
   state[3] = v[0];
   state[4] = v[1];
   state[5] = a[0];
   state[6] = a[1];
 
 	return state;
-
 }
 
 // Transform from Cartesian x,y coordinates to Frenet s,d coordinates

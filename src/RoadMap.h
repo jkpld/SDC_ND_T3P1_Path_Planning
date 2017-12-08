@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <math.h>
+#include "pchip.h"
 
 #include "Eigen-3.3/Eigen/Core"
 #include "Eigen-3.3/Eigen/QR"
@@ -26,6 +27,9 @@ private:
   MatrixXd wp_r;
   MatrixXd wp_n;
   VectorXd wp_s;
+
+  pchip x_road;
+  pchip y_road;
 
   /* ClosestWaypoint - Get the index of the closest waypoint to position (x,y)
     x : global x coordinate
