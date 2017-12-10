@@ -48,8 +48,8 @@ classdef Vehicle
         function obj = set.trajectory(obj,trj)
             obj.trajectory_ = trj;
             x = obj.trajectory(1).state_at(0);
-            y = obj.trajectory(1).state_at(0);
-            obj.state_ = State(0,x,y);
+            y = obj.trajectory(2).state_at(0);
+            obj.state_ = State(x,y);
         end
         
         function traj = get.trajectory(obj)
@@ -93,8 +93,8 @@ classdef Vehicle
         end
         
         function [x,y] = location(obj, t)
-            x = obj.trajectory(1).evaluate(t - obj.t0);
-            y = obj.trajectory(2).evaluate(t - obj.t0);
+            x = obj.trajectory(1).evaluate(t - obj.t0, 0);
+            y = obj.trajectory(2).evaluate(t - obj.t0, 0);
         end
         
         function [x,y] = speed(obj, t)
@@ -112,17 +112,24 @@ classdef Vehicle
             y = obj.trajectory(2).evaluate(t - obj.t0,3);
         end
         
-        function bbox_t = bounding_box(obj, t, safty_margin)
+        function [states_x, states_y] = generate_states(obj, t)
+            states_x = obj.trajectory(1).state_at(t - obj.t0);
+            states_y = obj.trajectory(2).state_at(t - obj.t0);
+        end
+        
+        function bbox_t = bounding_box(obj, t, safty_margin, th)
             % Assume we can get heading from derivative of trajectory,
             % should be correct as long as we do not go normal to the road.
             if numel(t) > 1
                 error('Vehicle:bounding_box_scalar','Only scalar time is supported')
             end
-            if nargin < 3
+            if nargin < 3 || isempty(safty_margin)
                 safty_margin = [0 0];
             end
 
-            th = orientation(obj,t);
+            if nargin < 4
+                th = orientation(obj,t);
+            end
 
             ct = cos(th);
             st = sin(th);

@@ -8,15 +8,16 @@ classdef TrajectoryGeneration
         ksd = 4;
         kd = 200;
         
+        
         k_lat = 1;
         k_lon = 1;
         
         % Safty_Margin added to the car sizes when determining if there is
         % a collision or not.
-        Safty_Margin = [0.5, 0.5];
+        Safty_Margin = 1*[0.5, 0.5];
         
         % Parameters for constant distance and constant time law.
-        D0 = 5; % [m]
+        D0 = 1; % [m]
         tau = 1; % [sec]
         
         % Width of the lanes.
@@ -30,13 +31,13 @@ classdef TrajectoryGeneration
         MIN_D = 0;
         MAX_D = 12;
         
-        Time_Horizon = 5;
+        Time_Horizon = 3;
         Reactive_Layer_Time_Horizon = 1;
     end
     properties (Hidden)
-        T = 1:1:5; % Time horizons to search for a new trajectory
+        T = 1:1:3; % Time horizons to search for a new trajectory
         ds = -5:1:3; % offset s distance to search for a new trajectory
-        dsd = -10:2:10; % offset speed values to search for new trajectory (velocity keeping)
+        dsd = -2:2:2; % offset speed values to search for new trajectory (velocity keeping)
         d = -5:1:5;%-2.25:4.5/8:2.25; % offset d distances to search for a new trajectory
     end
         
@@ -46,6 +47,7 @@ classdef TrajectoryGeneration
         
         function [collide, ego, dt] = reactive_layer(obj, ego, cars, Q)
             start = tic;
+            
             % Construct the car trajectories for collision detection.
             t = (0:0.1:obj.Reactive_Layer_Time_Horizon).';
             Nt = numel(t);
@@ -57,6 +59,7 @@ classdef TrajectoryGeneration
                 car_traj(:,1,car_idx) = x;
                 car_traj(:,2,car_idx) = y;
             end
+            
             % Get the minimum distance at which there cannot be a
             % collision
             min_collision_free_dist = ([cars.Length]/2).^2 +([cars.Width]/2).^2 + (ego.Length/2)^2 + (ego.Width/2)^2;
@@ -84,8 +87,9 @@ classdef TrajectoryGeneration
             dt = toc(start);
         end
         
-        function ego = generate(obj, Q, ego, activeModes, cars, lateral_search_values)
+        function [ego, collide] = generate(obj, Q, ego, activeModes, cars, lateral_search_values)
             state0 = ego.state;
+            tic
 %             send(Q,ego.ID)
 %             send(Q,state0)
 %             for i = 1:numel(activeModes)
@@ -150,6 +154,9 @@ classdef TrajectoryGeneration
 %                 send(Q, trajs_d(d_idx).pp{1})
 %                 send(Q, trajs_d(d_idx).pp{1}.coefs)
 %             end
+
+            
+            collide = false;
             % Only need to check for collisions of there are other cars.
             if nargin <5 || isempty(cars)
                 % Set the trajectory to be the lowest cost trajectory and
@@ -159,20 +166,23 @@ classdef TrajectoryGeneration
             else
                 
                 % Construct the car trajectories for collision detection.
-                t = (0:0.1:obj.Time_Horizon).';
+                t = (0:0.2:obj.Time_Horizon).';
                 Nt = numel(t);
                 Nc = numel(cars);
                 car_traj = zeros(Nt,2,Nc);
                 for car_idx = Nc:-1:1
-                    t0 = cars(car_idx).t0;
-                    [x,y] = cars(car_idx).location(t+t0);
+%                     t0 = cars(car_idx).t0;
+                    [x,y] = cars(car_idx).location(t);
                     car_traj(:,1,car_idx) = x;
                     car_traj(:,2,car_idx) = y;
                 end
+                
                 % Get the minimum distance at which there cannot be a
                 % collision
-                min_collision_free_dist = ([cars.Length]/2).^2 +([cars.Width]/2).^2 + (ego.Length/2)^2 + (ego.Width/2)^2;
+                min_collision_free_dist = sqrt(([cars.Length]/2+obj.Safty_Margin(1)).^2 +([cars.Width]/2+obj.Safty_Margin(2)).^2) + sqrt((ego.Length/2+obj.Safty_Margin(1))^2 + (ego.Width/2+obj.Safty_Margin(2))^2);
             
+                collide = false;
+                
                 % start checking the trajectories for collisions, starting with
                 % the lowest cost trajectory and then increasing
                 for i = 1:Ns*Nd
@@ -180,10 +190,14 @@ classdef TrajectoryGeneration
                     % Get the index of the d and s trajectory
                     [d_idx,s_idx] = ind2sub([Nd, Ns], idx(i));
 
+%                     send(Q,i)
+%                     send(Q,trajs_s(s_idx))
+%                     send(Q,trajs_s(s_idx).state_at(0))
                     % Set ego to have the trajectory
                     ego.trajectory = [trajs_s(s_idx), trajs_d(d_idx)];
 
                     % Check for collision
+                    
                     collide = detect_collision(obj, ego, cars, car_traj, t, min_collision_free_dist);
                     
                     % If we did not collide with anything, then we are done,
@@ -192,7 +206,16 @@ classdef TrajectoryGeneration
                         break;
                     end
                 end
+                
+                if collide
+                    send(Q,'No valid path found!!!')
+                    ego.state = state0;
+                    ego.t0 = 0;
+%                     [collide, ego, dt] = reactive_layer(obj, ego, cars, Q);
+                end
             end
+            
+            send(Q,toc);
         end
         
         function collide = detect_collision(obj, ego, cars, car_traj, t, min_collision_free_dist)
@@ -201,16 +224,16 @@ classdef TrajectoryGeneration
             Nc = numel(cars);
             
             % Get trajectory of ego
-            s_i = ego.trajectory(1).evaluate(t);
-            d_i = ego.trajectory(2).evaluate(t);
+            s_i = ego.trajectory(1).evaluate(t,0);
+            d_i = ego.trajectory(2).evaluate(t,0);
 
             % Compute the distance to each car as a function of time,
             % and normalize the minimum distance between ego and the
             % other cars for which there cannot be a collision. We thus
             % only need to check the distances that are less than 1, to
             % see if there is a collision or not.
-            D2 = permute(sum((car_traj - [s_i, d_i]).^2,2), [1,3,2]) ./ min_collision_free_dist;
-            check_idx = find(D2 < 1); % Find all points with a possible collision, these are linear indices
+            D2 = permute(sum((car_traj - [s_i, d_i]).^2,2), [1,3,2]) ./ min_collision_free_dist.^2;
+            check_idx = find(D2 <= 1); % Find all points with a possible collision, these are linear indices
 
             if numel(check_idx) > 0
                 % Order the points by increasing distance. This will
@@ -431,7 +454,7 @@ classdef TrajectoryGeneration
         
         function cost = following_merging_stopping_cost(obj, T, s1, target)
             % longitudinal position difference cost
-            cost = obj.ks * (s1(1) - polyval(target,T))^2;
+            cost = obj.ks * (s1(1) - polyval(target,T))^2 + 500/((s1(2)/10)^2+0.001);
         end
         
         function cost = velocity_keeping_cost(obj, s1, target_v)

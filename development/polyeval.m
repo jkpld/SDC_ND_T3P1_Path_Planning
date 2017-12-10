@@ -38,6 +38,12 @@ function [A_d, A_x0] = polyeval(a,x0)
 n = numel(a);
 Nx = numel(x0);
 
+if Nx==0
+    A_d = [];
+    A_x0 = [];
+    return;
+end
+
 if isrow(x0)
     x0 = x0';
 end

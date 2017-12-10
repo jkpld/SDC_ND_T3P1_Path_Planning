@@ -3,6 +3,7 @@ classdef CarSim < handle
         fig
         ax
         cars
+        ego
         ego_loc
         
         road
@@ -30,7 +31,7 @@ classdef CarSim < handle
     
     
     methods
-        function obj = CarSim(cars)
+        function obj = CarSim(cars, ego)
             
             try close(findobj('Type','Figure','Name','CarSim')), catch, end
             obj.fig = figure('Position',[300 630 1600 300],'Name','CarSim');
@@ -77,7 +78,8 @@ classdef CarSim < handle
             obj.carc = carc;
             
             % Initialize lines for plotting ego
-%             obj.ego_loc = [ego.state.x(1), ego.state.y(1)];
+            obj.ego = ego;
+            obj.ego_loc = [ego.state.x(1), ego.state.y(1), 0];
             obj.egobbox = line(nan,nan,'color','b');
             obj.egoc = line(nan,nan,'Marker','o','MarkerFaceColor','b');
             obj.ego_traj = line(nan,nan);
@@ -95,37 +97,110 @@ classdef CarSim < handle
             setTheme(gcf,'dark')
         end
         
-        function collide = advance(obj, ego)
+        function [collide, ego_pose, ego_path_xy, cars] = advance(obj, ego_path_xy)
 
-%             if isempty(ego_xy)
-%                 x = obj.ego_loc(1);
-%                 y = obj.ego_loc(2);
-%             else
-%                 x = ego_xy(1,1);
-%                 y = ego_xy(1,2);
-%                 ego_xy(1,:) = [];
-%                 obj.ego_loc(1) = x;
-%                 obj.ego_loc(2) = y;
-%             end
-            [x,y] = ego.location(obj.t);
+            if isempty(ego_path_xy)
+                % If there are no points in the locations list, the use the
+                % last location.
+                x = obj.ego_loc(1);
+                y = obj.ego_loc(2);
+                th = obj.ego_loc(3);
+            else
+                % When a new set of points it input, then the first few
+                % points could be out of data, thus, use the point that is
+                % closest to the last position of ego
+                d = sum((ego_path_xy - obj.ego_loc(1:2)).^2,2);
+                [~,idx] = min(d);
+                % Pop for the first element off the xy list.
+                x = ego_path_xy(idx,1);
+                y = ego_path_xy(idx,2);
+                ego_path_xy(1:idx,:) = [];
+                
+                % Compute the angle ego. (This should be approximately how
+                % the c++ simulator does it since it does not have any
+                % other information.)
+                th = atan2(y-obj.history_y(end), x-obj.history_x(end));
+                
+                % Update the ego location.
+                obj.ego_loc(1) = x;
+                obj.ego_loc(2) = y;
+                obj.ego_loc(3) = th;
+            end
+            
+            % Add the new location to the history for computing speed,
+            % acceleration, and jerk.
+            obj.add_to_history(x,y);
+            
+%             [x,y] = ego.location(obj.t);
 %             [v_x,v_y] = ego.speed(obj.t);
 %             [a_x,a_y] = ego.accel(obj.t);
 %             [j_x,j_y] = ego.jerk(obj.t);
 
+            % Update ego location marker and bounding box
             obj.egoc.XData = x;
             obj.egoc.YData = y;
 
-            bbox = ego.bounding_box(obj.t) + [x,y];
+            bbox = obj.ego.bounding_box(obj.t,[0.5,0.5],th) + [x,y];
             obj.egobbox.XData = bbox([1:end,1],1);
             obj.egobbox.YData = bbox([1:end,1],2);
             
+            % Update axis x-lims
             obj.ax.XLim = x + [0, diff(obj.ax.YLim)*1600/300] -20;
-            obj.add_to_history(x,y);
+            
+            % Update ego information
             [s,a,j] = obj.compute_speed_accel_jerk();
+            obj.update_ego_info(x,y,s,a,j)
+            ego_pose = struct('x',x,'y',y,'speed',s,'yaw',th);
             
 %             s = sqrt(v_x^2 + v_y^2);
 %             a = sqrt(a_x^2 + a_y^2);
 %             j = sqrt(j_x^2 + j_y^2);
+            
+            
+            % Update ego trajectory
+%             [x,y] = ego.location(obj.t + (0:0.1:1));
+            if ~isempty(ego_path_xy)
+                obj.ego_traj.XData = ego_path_xy(:,1);
+                obj.ego_traj.YData = ego_path_xy(:,2);
+            end
+            
+            % Update other cars locations and bounding boxes, and check for
+            % collisions
+            collide = false;
+            for j = 1:numel(obj.cars)
+    
+                [x,y] = obj.cars(j).location(obj.t);
+                bbox1 = obj.cars(j).bounding_box(obj.t, [0.5,0.5]) + [x,y];
+
+                collide = collide || RectangleCollision( bbox, bbox1);
+
+                obj.carbbox(j).XData = bbox1([1:end,1],1);
+                obj.carbbox(j).YData = bbox1([1:end,1],2);
+                
+                obj.carc(j).XData = x;
+                obj.carc(j).YData = y;
+            end
+            
+            % If there is a collision then display a message.
+            if collide
+                obj.message.Position(1) = mean(obj.ax.XLim);
+                obj.message.Position(2) = obj.ax.YLim(2) - 0.1*diff(obj.ax.YLim);
+                obj.message.String = 'Collide!';
+            else
+                obj.message.String = '';
+            end
+
+            % Update all car states to be relative to current time.
+            update_car_states(obj);
+            cars = get_cars(obj); % Get the cars to output.
+            
+            % Update the time for the next call
+            obj.t = obj.t + obj.dt;
+        end
+        
+        function update_ego_info(obj,x,y,s,a,j)
+            % Update the strings behind ego to show the current speed,
+            % acceleration, and jerk
             
             obj.egoInfo_s.Position(1:2) = [x-3, y + 0.7];
             obj.egoInfo_s.String = sprintf('s = %0.2f', s);
@@ -149,48 +224,25 @@ classdef CarSim < handle
             else
                 obj.egoInfo_j.Color = 0.6*[1 1 1];
             end
-            
-            [x,y] = ego.location(obj.t + (0:0.1:1));
-%             [x(:),y(:)]
-            obj.ego_traj.XData = x;%ego_xy(:,1);
-            obj.ego_traj.YData = y;%ego_xy(:,2);
-            
-            collide = false;
-            
-            for j = 1:numel(obj.cars)
-    
-                [x,y] = obj.cars(j).location(obj.t);
-                bbox1 = obj.cars(j).bounding_box(obj.t) + [x,y];
-
-                collide = collide || RectangleCollision( bbox, bbox1);
-
-                obj.carbbox(j).XData = bbox1([1:end,1],1);
-                obj.carbbox(j).YData = bbox1([1:end,1],2);
-                
-                obj.carc(j).XData = x;
-                obj.carc(j).YData = y;
-            end
-            
-            if collide
-                obj.message.Position(1) = mean(obj.ax.XLim);
-                obj.message.Position(2) = obj.ax.YLim(2) - 0.1*diff(obj.ax.YLim);
-                obj.message.String = 'Collide!';
-            else
-                obj.message.String = '';
-            end
-
-            update_car_states(obj);
-            obj.t = obj.t + obj.dt;
         end
         
         function update_car_states(obj)
+            % Get the car states, relative to now.
             for j = 1:numel(obj.cars)
                 obj.cars(j).state = obj.cars(j).state_at(obj.t);
                 obj.cars(j).t0 = obj.t;
             end
         end
         
+        function cars = get_cars(obj)
+            cars = obj.cars;
+            for j = 1:numel(obj.cars)
+                cars(j).t0 = 0;
+            end
+        end
+        
         function add_to_history(obj,x,y)
+            % Add points to history
             obj.history_x(end+1) = x;
             obj.history_y(end+1) = y;
             if numel(obj.history_x) > obj.history_size
@@ -200,9 +252,11 @@ classdef CarSim < handle
         end
         
         function [speed, accel, jerk] = compute_speed_accel_jerk(obj)
-            speed = nan;
-            accel = nan;
-            jerk = nan;
+            % Get the mean speed, acceleration, and jerk from the history
+            % of xy points.
+            speed = 0;
+            accel = 0;
+            jerk = 0;
             N = numel(obj.history_x);
             if N > 1
                 vx = diff(obj.history_x)/obj.dt;
@@ -210,22 +264,26 @@ classdef CarSim < handle
                 speed = mean(sqrt(vx.^2 + vy.^2));
             end
             if N > 2
-                ax = diff(vx)/obj.dt;
+                a_x = diff(vx)/obj.dt;
                 ay = diff(vy)/obj.dt;
-                accel = mean(sqrt(ax.^2 + ay.^2));
+                accel = mean(sqrt(a_x.^2 + ay.^2));
             end
             if N > 3
-                jx = diff(ax)/obj.dt;
+                jx = diff(a_x)/obj.dt;
                 jy = diff(ay)/obj.dt;
                 jerk = mean(sqrt(jx.^2 + jy.^2));
             end
         end
         
-        function reset(obj)
+        function reset(obj, ego)
+            % Reset the simulations (car states and history)
             obj.t = 0;
             obj.update_car_states();
             obj.history_x = [];
             obj.history_y = [];
+            
+            obj.ego = ego;
+            obj.ego_loc = [ego.state.x(1), ego.state.y(1), 0];
         end
     end
 end

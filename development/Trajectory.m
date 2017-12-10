@@ -1,83 +1,98 @@
 classdef Trajectory
-    properties
-        pp(1,4) cell
-    end
-    properties (Hidden)
-        coef(1,:) double
+    % Simple piecewise polynomial class that can have one or two pieces
+    
+    properties (SetAccess = private)
+        coef1(1,:) double
+        coef2(1,:) double
         T(1,1) double
+    end
+    properties (Hidden, SetAccess = private)
+        one_piece
     end
     methods
         function obj = Trajectory(coef, state_at_T, T)
+            
+            % Note: polynomials will not be stored in matlab's way, but as
+            % follows
+            % A(x) = a(1) + a(2)*x + a(3)*x^2 + ... = a(i)*x^(i-1)
+            
             if nargin == 0
-                obj.pp{4} = mkpp([-inf,inf], 0);
-                obj.pp{1} = mkpp([-inf,inf], 0);
-                obj.pp{2} = mkpp([-inf,inf], 0);
-                obj.pp{3} = mkpp([-inf,inf], 0);
-                return;
-            end
-            c1 = [zeros(1,max(3-numel(coef),0)), coef];
-            c1d = Trajectory.polyder(coef);
-            c1dd = Trajectory.polyder(c1d);
-            c1ddd = Trajectory.polyder(c1dd);
-            
-            obj.coef = coef;
-            
-            if nargin == 1
-                % Construct a single piece polynomial valid to t=inf.
-                
-                obj.pp = cell(1,4);
-                
-                obj.pp{1} = mkpp([0,inf], c1);
-                obj.pp{2} = mkpp([0,inf], c1d);
-                obj.pp{3} = mkpp([0,inf], c1dd);
-                obj.pp{4} = mkpp([0,inf], c1ddd);
-                
+                obj.coef1 = 0;
                 obj.T = inf;
+                obj.one_piece = true;
             else
-                % A time horizon and the state at the time horizon was
-                % given
-                state_at_T = [0.5*state_at_T(3), state_at_T(2), state_at_T(1)];
-                c2 = [zeros(1,max(numel(coef)-3,0)), state_at_T];
-                c2d = Trajectory.polyder(c2);
-                c2dd = Trajectory.polyder(c2d);
-                c2ddd = Trajectory.polyder(c2dd);
+                if nargin == 1
+                    % Construct a single piece polynomial valid to t=inf.
+                    obj.coef1 = coef;
+                    obj.T = inf;
+                    obj.one_piece = true;
+                else
+                    % Cunstruct a two piece polynomial with coefficeints
+                    % coef for t<=T and use state state_at_T for times t>T
 
-                obj.pp = cell(1,4);
+                    % Integrate the state to get the trajectory
+                    % T(t) = x(1) + x(2)*t + 0.5*x(3)*t^2
+                    c2 = [0.5*state_at_T(3), state_at_T(2), state_at_T(1)];
 
-                obj.pp{1} = mkpp([0,T,inf], [c1; c2]);
-                obj.pp{2} = mkpp([0,T,inf], [c1d; c2d]);
-                obj.pp{3} = mkpp([0,T,inf], [c1dd; c2dd]);
-                obj.pp{4} = mkpp([0,T,inf], [c1ddd; c2ddd]);
-
-                
-                obj.T = T;
+                    coef = [zeros(1,max(3-numel(coef),0)), coef];
+                    obj.coef1 = coef;
+                    obj.coef2 = [zeros(1,numel(coef)-3), c2];
+                    obj.T = T;
+                    obj.one_piece = false;
+                end
             end
         end
         
         function val = evaluate(obj, t, n)
+            % Evaluate the all derivatives of the piecewise polynomial
+            % (including the 0'th derivative, i.e. the polynomial value) at
+            % the values t.
+            % If input n is specified, then only the n'th derivative is
+            % returned. -Note that all derivatives are computed regardless,
+            % unless n=0, in which case only the polynomial value is
+            % returned. 
+            
             if nargin<3
-                n = 0;
+                n = -1;
             end
             
-            if n>3
-                error('Trajectory:only3rdDeriv','Only up to the 3rd derivative can be returned.')
-            end
+            if n == 0
+                if obj.one_piece
+                    val = polyval(obj.coef1, t);
+                else
+                    val = [polyval(obj.coef1, t(t < obj.T)); 
+                           polyval(obj.coef2, t(t >= obj.T)-obj.T)];
+                end
+            else
+                if obj.one_piece
+                    val = polyeval(flip(obj.coef1), t);
+                else
+                    val = [polyeval(flip(obj.coef1), t(t < obj.T));
+                            polyeval(flip(obj.coef2), t(t >= obj.T)-obj.T)];
+                    
+                end
             
-            val = ppval(obj.pp{n+1}, t);
+                if n > 0
+                    val = val(:,n+1); % Only return the n'th derivative
+                end
+            end
+        end
+        
+        function coef = coefs_at(obj, t)
+            if obj.one_piece
+                [~,coef] = polyeval(flip(obj.coef1), t(1));
+            else
+                if t(1) < obj.T
+                    [~,coef] = polyeval(flip(obj.coef1), t(1));
+                else
+                    [~,coef] = polyeval(flip(obj.coef2), t(1)-obj.T);
+                end
+            end
         end
         
         function state = state_at(obj, t)
-            state = [obj.evaluate(t,0), obj.evaluate(t,1), obj.evaluate(t,2)];
-        end
-    end
-    
-    methods (Access = private, Static)
-        function coef = polyder(coef)
-            % Same as normal polyder, but the size of the returned array is
-            % always one less than the size of the input array. (No
-            % trimming high order zeros.)
-            n = numel(coef);
-            coef = [0,coef(1:n-1).*(n-1:-1:1)];
+            state = obj.evaluate(t);
+            state = state(:,1:3);
         end
     end
 end
