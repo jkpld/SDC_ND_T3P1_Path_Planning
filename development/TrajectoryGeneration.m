@@ -215,7 +215,7 @@ classdef TrajectoryGeneration
                 end
             end
             
-            send(Q,toc);
+%             send(Q,toc);
         end
         
         function collide = detect_collision(obj, ego, cars, car_traj, t, min_collision_free_dist)
@@ -267,7 +267,7 @@ classdef TrajectoryGeneration
         
         function [trajs, costs, is_valid] = lateral(obj, state0, lateral_search_values)
             d0 = state0.y;
-            d = lateral_search_values + d0(1);
+            d = lateral_search_values + ceil(d0(1)/obj.lane_width)*obj.lane_width;
             d(d<obj.MIN_D | d>obj.MAX_D) = [];
             [d,T] = meshgrid(d, obj.T);  %#ok<*PROPLC>
             d = d(:);
@@ -454,7 +454,7 @@ classdef TrajectoryGeneration
         
         function cost = following_merging_stopping_cost(obj, T, s1, target)
             % longitudinal position difference cost
-            cost = obj.ks * (s1(1) - polyval(target,T))^2 + 500/((s1(2)/10)^2+0.001);
+            cost = obj.ks * (s1(1) - polyval(target,T))^2;% + 100*(1-s1(2)/obj.MAX_SPEED).^2;% + 500/((s1(2)/10)^2+0.001);
         end
         
         function cost = velocity_keeping_cost(obj, s1, target_v)

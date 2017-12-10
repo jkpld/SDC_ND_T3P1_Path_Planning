@@ -9,11 +9,13 @@ classdef CarSim < handle
         road
         
         egobbox
+        egobboxSM
         egoc
         ego_traj
         
         
         carbbox
+        carbboxSM
         carc
         
         t
@@ -23,10 +25,19 @@ classdef CarSim < handle
         egoInfo_s
         egoInfo_a
         egoInfo_j
+        fps
         
         history_x = []
         history_y = []
-        history_size = 25;
+        history_size = 15;
+        
+        FPSclock = -1;
+        FPS_hist = [];
+        counter = 1;
+       
+        
+        Safty_Margin = [0.5,0.5];
+        min_collision_free_dist
     end
     
     
@@ -70,22 +81,23 @@ classdef CarSim < handle
                 obj.cars = cars;
             end
             
-            for i = numel(obj.cars):-1:1
-                carbbox(i) = line(nan,nan,'color','r');
-                carc(i) = line(nan,nan,'Marker','o','MarkerFaceColor','r');
-            end
-            obj.carbbox = carbbox;
-            obj.carc = carc;
+            obj.carc = line(nan,nan,'Marker','o','MarkerFaceColor','r','LineStyle','none');
+            obj.carbbox = line(nan,nan,'color','r');
+            obj.carbboxSM = line(nan,nan,'color',[0.3,0,0],'LineStyle','--');
             
             % Initialize lines for plotting ego
             obj.ego = ego;
             obj.ego_loc = [ego.state.x(1), ego.state.y(1), 0];
             obj.egobbox = line(nan,nan,'color','b');
+            obj.egobboxSM = line(nan,nan,'color',[0,0,0.3], 'LineStyle','--');
             obj.egoc = line(nan,nan,'Marker','o','MarkerFaceColor','b');
-            obj.ego_traj = line(nan,nan);
+            obj.ego_traj = line(nan,nan,'color',[0,0.8,0]);
+            
+            obj.min_collision_free_dist = sqrt(([cars.Length]/2).^2 +([cars.Width]/2).^2) + sqrt((ego.Length/2)^2 + (ego.Width/2)^2);
             
             % Create a text box for displaying messages
             obj.message = text(0,0,'','FontSize',20);
+            obj.fps = text(0,0,'','FontSize',14, 'VerticalAlignment','bottom');
             obj.egoInfo_s = text(0,0,'','FontSize',10, 'VerticalAlignment','middle','HorizontalAlignment','right');
             obj.egoInfo_a = text(0,0,'','FontSize',10, 'VerticalAlignment','middle','HorizontalAlignment','right');
             obj.egoInfo_j = text(0,0,'','FontSize',10, 'VerticalAlignment','middle','HorizontalAlignment','right');
@@ -99,6 +111,10 @@ classdef CarSim < handle
         
         function [collide, ego_pose, ego_path_xy, cars] = advance(obj, ego_path_xy)
 
+            if obj.FPSclock == -1
+                obj.FPSclock = tic;
+            end
+
             if isempty(ego_path_xy)
                 % If there are no points in the locations list, the use the
                 % last location.
@@ -111,6 +127,9 @@ classdef CarSim < handle
                 % closest to the last position of ego
                 d = sum((ego_path_xy - obj.ego_loc(1:2)).^2,2);
                 [~,idx] = min(d);
+                if isequal(obj.ego_loc(1:2), ego_path_xy(idx,:))
+                    idx = idx+1;
+                end
                 % Pop for the first element off the xy list.
                 x = ego_path_xy(idx,1);
                 y = ego_path_xy(idx,2);
@@ -130,19 +149,19 @@ classdef CarSim < handle
             % Add the new location to the history for computing speed,
             % acceleration, and jerk.
             obj.add_to_history(x,y);
-            
-%             [x,y] = ego.location(obj.t);
-%             [v_x,v_y] = ego.speed(obj.t);
-%             [a_x,a_y] = ego.accel(obj.t);
-%             [j_x,j_y] = ego.jerk(obj.t);
 
             % Update ego location marker and bounding box
             obj.egoc.XData = x;
             obj.egoc.YData = y;
 
-            bbox = obj.ego.bounding_box(obj.t,[0.5,0.5],th) + [x,y];
+            bbox = obj.ego.bounding_box(obj.t,[0,0],th) + [x,y];
+            bboxSM = obj.ego.bounding_box(obj.t,obj.Safty_Margin,th) + [x,y];
             obj.egobbox.XData = bbox([1:end,1],1);
             obj.egobbox.YData = bbox([1:end,1],2);
+            obj.egobboxSM.XData = bboxSM([1:end,1],1);
+            obj.egobboxSM.YData = bboxSM([1:end,1],2);
+            egox = x;
+            egoy = y;
             
             % Update axis x-lims
             obj.ax.XLim = x + [0, diff(obj.ax.YLim)*1600/300] -20;
@@ -152,13 +171,7 @@ classdef CarSim < handle
             obj.update_ego_info(x,y,s,a,j)
             ego_pose = struct('x',x,'y',y,'speed',s,'yaw',th);
             
-%             s = sqrt(v_x^2 + v_y^2);
-%             a = sqrt(a_x^2 + a_y^2);
-%             j = sqrt(j_x^2 + j_y^2);
-            
-            
             % Update ego trajectory
-%             [x,y] = ego.location(obj.t + (0:0.1:1));
             if ~isempty(ego_path_xy)
                 obj.ego_traj.XData = ego_path_xy(:,1);
                 obj.ego_traj.YData = ego_path_xy(:,2);
@@ -167,24 +180,44 @@ classdef CarSim < handle
             % Update other cars locations and bounding boxes, and check for
             % collisions
             collide = false;
+            bboxline = nan(numel(obj.cars)*6 - 1,2);
+            bboxlineSM = nan(numel(obj.cars)*6 - 1,2);
+            carc_x = nan(1,numel(obj.cars));
+            carc_y = nan(1,numel(obj.cars));
+            
             for j = 1:numel(obj.cars)
     
                 [x,y] = obj.cars(j).location(obj.t);
-                bbox1 = obj.cars(j).bounding_box(obj.t, [0.5,0.5]) + [x,y];
+                bbox1 = obj.cars(j).bounding_box(obj.t, [0,0]) + [x,y];
+                bbox1SM = obj.cars(j).bounding_box(obj.t, obj.Safty_Margin) + [x,y];
 
-                collide = collide || RectangleCollision( bbox, bbox1);
-
-                obj.carbbox(j).XData = bbox1([1:end,1],1);
-                obj.carbbox(j).YData = bbox1([1:end,1],2);
                 
-                obj.carc(j).XData = x;
-                obj.carc(j).YData = y;
+                if sqrt(sum(([x,y]-[egox,egoy]).^2)) <= obj.min_collision_free_dist(j)
+                    collide = collide || RectangleCollision( bbox, bbox1);
+                end
+
+                % only draw car if it within the axis limits.
+                x_dist = (x+[1,-1]*(obj.cars(j).Length/2 + obj.Safty_Margin(1)));
+                if  x_dist(1) > obj.ax.XLim(1) && x_dist(2) < obj.ax.XLim(2)
+                    bboxline((1:5) + 6*(j-1),:) = bbox1([1:end,1],:);
+                    bboxlineSM((1:5) + 6*(j-1),:) = bbox1SM([1:end,1],:);
+
+                    carc_x(j) = x;
+                    carc_y(j) = y;
+                end
             end
+            
+            obj.carc.XData = carc_x;
+            obj.carc.YData = carc_y;
+            obj.carbbox.XData = bboxline(:,1);
+            obj.carbbox.YData = bboxline(:,2);
+            obj.carbboxSM.XData = bboxlineSM(:,1);
+            obj.carbboxSM.YData = bboxlineSM(:,2);
             
             % If there is a collision then display a message.
             if collide
                 obj.message.Position(1) = mean(obj.ax.XLim);
-                obj.message.Position(2) = obj.ax.YLim(2) - 0.1*diff(obj.ax.YLim);
+                obj.message.Position(2) = obj.ax.YLim(2) - 0.14*diff(obj.ax.YLim);
                 obj.message.String = 'Collide!';
             else
                 obj.message.String = '';
@@ -194,8 +227,26 @@ classdef CarSim < handle
             update_car_states(obj);
             cars = get_cars(obj); % Get the cars to output.
             
+            
+%             while toc(obj.FPSclock) < 0.015
+%             end
+            
+            FPS = 1/toc(obj.FPSclock);
+            obj.FPS_hist(mod(ceil(obj.t/obj.dt), obj.history_size)+1) = FPS;
+            obj.fps.Position(1:2) = [obj.ax.XLim(1), obj.ax.YLim(2) - 0.14*diff(obj.ax.YLim)];
+            obj.fps.String = sprintf('FPS = %0.0f',mean(obj.FPS_hist));
+            
+            
+            obj.FPSclock = tic;
+%             drawnow;
+            if mean(obj.FPS_hist)>50
+                drawnow;
+            end
+            
+            
             % Update the time for the next call
             obj.t = obj.t + obj.dt;
+            
         end
         
         function update_ego_info(obj,x,y,s,a,j)
@@ -243,11 +294,14 @@ classdef CarSim < handle
         
         function add_to_history(obj,x,y)
             % Add points to history
-            obj.history_x(end+1) = x;
-            obj.history_y(end+1) = y;
-            if numel(obj.history_x) > obj.history_size
-                obj.history_x(1) = [];
-                obj.history_y(1) = [];
+            if numel(obj.history_x) == obj.history_size
+                obj.history_x = circshift(obj.history_x,-1);
+                obj.history_y = circshift(obj.history_y,-1);
+                obj.history_x(end) = x;
+                obj.history_y(end) = y;
+            else
+                obj.history_x(end+1) = x;
+                obj.history_y(end+1) = y;
             end
         end
         
@@ -261,29 +315,28 @@ classdef CarSim < handle
             if N > 1
                 vx = diff(obj.history_x)/obj.dt;
                 vy = diff(obj.history_y)/obj.dt;
-                speed = mean(sqrt(vx.^2 + vy.^2));
+                speed = median(sqrt(vx.^2 + vy.^2));
             end
             if N > 2
                 a_x = diff(vx)/obj.dt;
                 ay = diff(vy)/obj.dt;
-                accel = mean(sqrt(a_x.^2 + ay.^2));
+                accel = median(sqrt(a_x.^2 + ay.^2));
             end
             if N > 3
                 jx = diff(a_x)/obj.dt;
                 jy = diff(ay)/obj.dt;
-                jerk = mean(sqrt(jx.^2 + jy.^2));
+                jerk = median(sqrt(jx.^2 + jy.^2));
             end
         end
         
-        function reset(obj, ego)
+        function reset(obj)
             % Reset the simulations (car states and history)
             obj.t = 0;
             obj.update_car_states();
             obj.history_x = [];
             obj.history_y = [];
-            
-            obj.ego = ego;
-            obj.ego_loc = [ego.state.x(1), ego.state.y(1), 0];
+            obj.ego_loc = [obj.ego.state.x(1), obj.ego.state.y(1), 0];
+            obj.FPS_hist = [];
         end
     end
 end
