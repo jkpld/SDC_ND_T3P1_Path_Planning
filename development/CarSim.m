@@ -26,6 +26,8 @@ classdef CarSim < handle
         egoInfo_a
         egoInfo_j
         fps
+        lane_nums
+        current_time
         
         history_x = []
         history_y = []
@@ -102,19 +104,30 @@ classdef CarSim < handle
             obj.egoInfo_a = text(0,0,'','FontSize',10, 'VerticalAlignment','middle','HorizontalAlignment','right');
             obj.egoInfo_j = text(0,0,'','FontSize',10, 'VerticalAlignment','middle','HorizontalAlignment','right');
             
+            for i = num_lanes:-1:1
+                lane_ns(i) = text(0,(i-0.5)*lane_width, sprintf('%d',i), 'FontSize', 16,'VerticalAlignment','middle','HorizontalAlignment','right');
+            end
+            obj.lane_nums = lane_ns;
             % Initilize the simulation time
             obj.t = 0;
+            
+            obj.current_time = text(0,(num_lanes-0.3)*lane_width, '', 'FontSize',12,'VerticalAlignment','middle','HorizontalAlignment','right');
             
             % Make the figure dark theme.
             setTheme(gcf,'dark')
         end
         
-        function [collide, ego_pose, ego_path_xy, cars] = advance(obj, ego_path_xy)
+        function [collide, ego_pose, ego_path_xy, cars, other_paths] = advance(obj, ego_path_xy, other_paths)
 
             if obj.FPSclock == -1
                 obj.FPSclock = tic;
             end
 
+            try
+                delete(findall(obj.ax,'Tag','OtherPaths'))
+            catch
+            end
+            
             if isempty(ego_path_xy)
                 % If there are no points in the locations list, the use the
                 % last location.
@@ -134,6 +147,10 @@ classdef CarSim < handle
                 x = ego_path_xy(idx,1);
                 y = ego_path_xy(idx,2);
                 ego_path_xy(1:idx,:) = [];
+                
+                for i = 1:numel(other_paths)
+                    other_paths{i}(1:min(idx,size(other_paths{i},1)),:) = [];
+                end
                 
                 % Compute the angle ego. (This should be approximately how
                 % the c++ simulator does it since it does not have any
@@ -176,6 +193,13 @@ classdef CarSim < handle
                 obj.ego_traj.XData = ego_path_xy(:,1);
                 obj.ego_traj.YData = ego_path_xy(:,2);
             end
+            
+            % Plot any other trajectories
+%             other_paths
+            for i = 1:numel(other_paths)
+                line(other_paths{i}(:,1),other_paths{i}(:,2), 'color',[0,0.4,0],'Parent',obj.ax,'Tag','OtherPaths')
+            end
+            
             
             % Update other cars locations and bounding boxes, and check for
             % collisions
@@ -228,8 +252,16 @@ classdef CarSim < handle
             cars = get_cars(obj); % Get the cars to output.
             
             
-%             while toc(obj.FPSclock) < 0.015
-%             end
+            % Update lane number positions
+            for i = 1:numel(obj.lane_nums)
+                obj.lane_nums(i).Position(1) = obj.ax.XLim(2);
+            end
+            
+            obj.current_time.Position(1) = obj.ax.XLim(2);
+            obj.current_time.String = sprintf('%0.2f', obj.t);
+            
+            while toc(obj.FPSclock) < 0.015
+            end
             
             FPS = 1/toc(obj.FPSclock);
             obj.FPS_hist(mod(ceil(obj.t/obj.dt), obj.history_size)+1) = FPS;
@@ -242,6 +274,7 @@ classdef CarSim < handle
             if mean(obj.FPS_hist)>50
                 drawnow;
             end
+            
             
             
             % Update the time for the next call

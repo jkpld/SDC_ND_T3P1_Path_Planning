@@ -57,6 +57,9 @@ classdef Trajectory
             end
             
             if n == 0
+                if isrow(t)
+                    t = t.';
+                end
                 if obj.one_piece
                     val = polyval(obj.coef1, t);
                 else

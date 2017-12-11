@@ -44,6 +44,7 @@ if Nx==0
     return;
 end
 
+
 if isrow(x0)
     x0 = x0';
 end

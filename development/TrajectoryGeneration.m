@@ -36,9 +36,9 @@ classdef TrajectoryGeneration
     end
     properties (Hidden)
         T = 1:1:3; % Time horizons to search for a new trajectory
-        ds = -5:1:3; % offset s distance to search for a new trajectory
+        ds = -5:1:5; % offset s distance to search for a new trajectory
         dsd = -2:2:2; % offset speed values to search for new trajectory (velocity keeping)
-        d = -5:1:5;%-2.25:4.5/8:2.25; % offset d distances to search for a new trajectory
+        d = -1:1;%-2.25:4.5/8:2.25; % offset d distances to search for a new trajectory
     end
         
     methods
@@ -47,7 +47,7 @@ classdef TrajectoryGeneration
         
         function [collide, ego, dt] = reactive_layer(obj, ego, cars, Q)
             start = tic;
-            
+            send(Q,' ---------  In Reactive layer!  ------------')
             % Construct the car trajectories for collision detection.
             t = (0:0.1:obj.Reactive_Layer_Time_Horizon).';
             Nt = numel(t);
@@ -64,11 +64,10 @@ classdef TrajectoryGeneration
             % collision
             min_collision_free_dist = ([cars.Length]/2).^2 +([cars.Width]/2).^2 + (ego.Length/2)^2 + (ego.Width/2)^2;
             
-            send(Q, cars(2).state)
             % Detect if there will be a collision
             collide = detect_collision(obj, ego, cars, car_traj, t, min_collision_free_dist);
-            send(Q, collide)
-            if collide
+%             send(Q, collide)
+%             if collide
                 % If there a collision was detected, then search for a new
                 % trajectory to try and avoid it
                 min_speed = inf;
@@ -77,35 +76,40 @@ classdef TrajectoryGeneration
                         min_speed = cars(i).state.x(2);
                     end
                 end
-                activeModes = struct('name',"velocity_keeping",'data',min_speed);
-                activeModes(2).name = "stopping";
-                activeModes(2).data = min_speed*1;
+                activeModes(1) = ActiveMode("velocity_keeping", min_speed);
+                activeModes(2) = ActiveMode("stopping", min_speed*1);
+%                 activeModes = struct('name',"velocity_keeping",'data',min_speed);
+%                 activeModes(2).name = "stopping";
+%                 activeModes(2).data = min_speed*1;
                 d_search = -7:1:7;
                 
-                ego = generate(obj, [], ego, activeModes, cars, d_search);
-            end
+                [ego, collide] = generate(obj, Q, ego, cars, activeModes, 2, d_search);
+%             end
             dt = toc(start);
         end
         
-        function [ego, collide] = generate(obj, Q, ego, activeModes, cars, lateral_search_values)
+        function [ego, collide] = generate(obj, Q, ego, cars, activeModes, goal_lane, lateral_search_values)
             state0 = ego.state;
             tic
-%             send(Q,ego.ID)
-%             send(Q,state0)
-%             for i = 1:numel(activeModes)
-%                 send(Q,activeModes(i))
-%             end
-%             send(Q,activeModes(2).data(1).state)
             
             % create valid lateral trajectories
             if nargin < 6
+                goal_lane = ceil(state0.y(1) / obj.lane_width);
+            end
+            if nargin < 7
                 lateral_search_values = obj.d;
             end
-            [trajs_d, costs_d, is_valid_d] = lateral(obj, state0, lateral_search_values);
+%             send(Q, obj.d)
+%             send(Q, lateral_search_values)
+%             send(Q, (goal_lane - 0.5) * obj.lane_width + lateral_search_values)
+            [trajs_d, costs_d, is_valid_d] = lateral(obj, state0, goal_lane, lateral_search_values,Q);
             trajs_d = trajs_d(is_valid_d);
             costs_d = costs_d(is_valid_d);
             Nd = numel(costs_d);
-                
+            if Nd == 0
+                collide = true;
+                return
+            end
             % Create valid longitudinal trajectories for each active mode
             for i = numel(activeModes):-1:1
                 switch activeModes(i).name
@@ -131,7 +135,11 @@ classdef TrajectoryGeneration
             costs_s = cat(1,costs_s{:});
             
             Ns = numel(costs_s);
-            
+            if Ns == 0
+                collide = true;
+                return
+            end
+
             % - Construct the cost for each possible combination of
             % d_trajectory with s_trajectory.
             % - Iterate through the possible combinations in the order of
@@ -143,22 +151,11 @@ classdef TrajectoryGeneration
             
             cost = obj.k_lat*costs_d(:) + obj.k_lon*costs_s(:)';
             [~, idx] = sort(cost(:)); % idx is the linear index into the matrix d_traj x s_traj
-%             for i = 1:10
-% %                 send(Q,cost(idx(i)))
-%                 [d_idx,s_idx] = ind2sub([Nd, Ns], idx(i));
-% 
-%                 % Set ego to have the trajectory
-%                 send(Q, sprintf('Trajectory (%d) with cost %0.3f..............\n', i, cost(idx(i))))
-%                 send(Q, trajs_s(s_idx).pp{1})
-%                 send(Q, trajs_s(s_idx).pp{1}.coefs)
-%                 send(Q, trajs_d(d_idx).pp{1})
-%                 send(Q, trajs_d(d_idx).pp{1}.coefs)
-%             end
-
             
             collide = false;
             % Only need to check for collisions of there are other cars.
             if nargin <5 || isempty(cars)
+                
                 % Set the trajectory to be the lowest cost trajectory and
                 % give it to ego
                 [d_idx,s_idx] = ind2sub([Nd, Ns], idx(1));
@@ -171,7 +168,6 @@ classdef TrajectoryGeneration
                 Nc = numel(cars);
                 car_traj = zeros(Nt,2,Nc);
                 for car_idx = Nc:-1:1
-%                     t0 = cars(car_idx).t0;
                     [x,y] = cars(car_idx).location(t);
                     car_traj(:,1,car_idx) = x;
                     car_traj(:,2,car_idx) = y;
@@ -182,30 +178,29 @@ classdef TrajectoryGeneration
                 min_collision_free_dist = sqrt(([cars.Length]/2+obj.Safty_Margin(1)).^2 +([cars.Width]/2+obj.Safty_Margin(2)).^2) + sqrt((ego.Length/2+obj.Safty_Margin(1))^2 + (ego.Width/2+obj.Safty_Margin(2))^2);
             
                 collide = false;
-                
                 % start checking the trajectories for collisions, starting with
                 % the lowest cost trajectory and then increasing
+
                 for i = 1:Ns*Nd
 
                     % Get the index of the d and s trajectory
                     [d_idx,s_idx] = ind2sub([Nd, Ns], idx(i));
 
-%                     send(Q,i)
-%                     send(Q,trajs_s(s_idx))
-%                     send(Q,trajs_s(s_idx).state_at(0))
                     % Set ego to have the trajectory
                     ego.trajectory = [trajs_s(s_idx), trajs_d(d_idx)];
 
-                    % Check for collision
-                    
-                    collide = detect_collision(obj, ego, cars, car_traj, t, min_collision_free_dist);
-                    
+                    % Check for collision                    
+                    collide = detect_collision(obj, ego, cars, car_traj, t, min_collision_free_dist, Q);
+
                     % If we did not collide with anything, then we are done,
                     % and ego already has the new trajectory;
                     if ~collide
                         break;
                     end
                 end
+                
+%                 d_i = ego.trajectory(2).evaluate(t,0);
+%                 send(Q,sprintf('Going off road: %d', any((d_i < obj.MIN_D) | (d_i > obj.MAX_D))))
                 
                 if collide
                     send(Q,'No valid path found!!!')
@@ -218,7 +213,7 @@ classdef TrajectoryGeneration
 %             send(Q,toc);
         end
         
-        function collide = detect_collision(obj, ego, cars, car_traj, t, min_collision_free_dist)
+        function collide = detect_collision(obj, ego, cars, car_traj, t, min_collision_free_dist, Q)
            
             Nt = numel(t);
             Nc = numel(cars);
@@ -226,7 +221,7 @@ classdef TrajectoryGeneration
             % Get trajectory of ego
             s_i = ego.trajectory(1).evaluate(t,0);
             d_i = ego.trajectory(2).evaluate(t,0);
-
+            
             % Compute the distance to each car as a function of time,
             % and normalize the minimum distance between ego and the
             % other cars for which there cannot be a collision. We thus
@@ -265,10 +260,27 @@ classdef TrajectoryGeneration
                     
         end
         
-        function [trajs, costs, is_valid] = lateral(obj, state0, lateral_search_values)
+        function [trajs, costs, is_valid] = lateral(obj, state0, goal_lane, lateral_search_values,Q)
+            
+            % Starting state
             d0 = state0.y;
-            d = lateral_search_values + ceil(d0(1)/obj.lane_width)*obj.lane_width;
-            d(d<obj.MIN_D | d>obj.MAX_D) = [];
+            
+            % Compute the current lane and the goal lane
+%             lane0 = ceil(d0(1) / obj.lane_width);
+%             lane1 = lane0 + lane_offset;
+            d_goal = (goal_lane - 0.5) * obj.lane_width; % The goal lane position.
+            
+            % Grid of search values.
+            d = lateral_search_values + d_goal;
+            
+            d((d<obj.MIN_D) | (d>obj.MAX_D)) = [];
+            if isempty(d)
+                trajs = Trajectory.empty();
+                costs = 9999999;
+                is_valid = false;
+                return;
+            end
+            
             [d,T] = meshgrid(d, obj.T);  %#ok<*PROPLC>
             d = d(:);
             T = T(:);
@@ -282,8 +294,8 @@ classdef TrajectoryGeneration
                 d1 = [d(i), 0, 0];
                   
                 coefs(i,:) = JMT(obj, d0, d1, T(i));
-                costs(i) = ComputeCost(obj, coefs(i,:), T(i), d1, [], "lateral");
-                is_valid(i) = ComputeValidity(obj, coefs(i,:), T(i));
+                costs(i) = ComputeCost(obj, coefs(i,:), T(i), d1 - [d_goal, 0, 0], [], "lateral");
+                is_valid(i) = ComputeValidity(obj, coefs(i,:), T(i), true);
                 trajs(i) = Trajectory(coefs(i,:),d1,T(i));
             end
                         
@@ -322,8 +334,8 @@ classdef TrajectoryGeneration
             % [best_coefs, cost] = merging(obj, s0, sa, sb)
             
             s0 = state0.x;
-            sa = sa.x;
-            sb = sb.x;
+            sa = sa.state.x;
+            sb = sb.state.x;
             
             % merge between two vehicles given by sa and sb
             % sa = [xa, va, aa];
@@ -465,8 +477,8 @@ classdef TrajectoryGeneration
         function cost = lateral_cost(obj, d1)
             % lateral position difference cost 
             % Note! d1 should be relative to the current lane center.
-            cost = obj.ks * (mod(d1(1),obj.lane_width)-obj.lane_width/2)^2;
-%             cost = obj.ks * d1(1)^2;
+%             cost = obj.ks * (mod(d1(1),obj.lane_width)-obj.lane_width/2)^2;
+            cost = obj.ks * d1(1)^2;
         end
         
         function cost = ComputeCost(obj, coefs, T, s1, target, type)
@@ -493,12 +505,26 @@ classdef TrajectoryGeneration
             
         end
         
-        function is_valid = ComputeValidity(obj, coefs, T)
+        function is_valid = ComputeValidity(obj, coefs, T, is_lateral)
+            if nargin < 4
+                is_lateral = 0;
+            end
             is_valid = true(numel(T),1);
             max_vals = [obj.MAX_SPEED, obj.MAX_ACCEL, obj.MAX_JERK];
-            
+
             for i = 1:numel(T)
                 p = polyder(coefs(i,:));
+                
+                if is_lateral
+                    r = roots(p);
+                    r(r<0 | r>T(i)) = [];
+                    d = abs(polyval(coefs(i,:), [r; 0; T(i)]));
+                    if any((d<obj.MIN_D) | (d>obj.MAX_D))
+                        is_valid(i) = false;
+                        continue;
+                    end
+                end
+                
                 for j = 1:3
                     pp = polyder(p);
                     r = roots(pp);
@@ -506,6 +532,7 @@ classdef TrajectoryGeneration
                     v = abs(polyval(p, [r; 0; T(i)]));
                     if any(v>max_vals(j))
                         is_valid(i) = false;
+                        break;
                     end
                     p = pp;
                 end
