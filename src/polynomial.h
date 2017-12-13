@@ -17,15 +17,18 @@ using namespace Eigen;
 using namespace std;
 
 /* polyder : compute the derivative of a polynomial. */
-VectorXd polyder(VectorXd const& coef) {
+VectorXd polyder(VectorXd const& coef, bool same_size = false) {
   int N = coef.size();
-  return coef.tail(N-1).cwiseProduct(VectorXd::LinSpaced(N-1,1,N-1));
+  if (N==1) return VectorXd::Zero(1);
+
+  if (same_size) {
+    VectorXd coefd = VectorXd::Zero(N);
+    coefd.head(N-1) = coef.tail(N-1).cwiseProduct(VectorXd::LinSpaced(N-1,1,N-1));
+    return coefd;
+  } else {
+    return coef.tail(N-1).cwiseProduct(VectorXd::LinSpaced(N-1,1,N-1));
+  }
 };
-/* // If you want the vector to remain the same length use this
-VectorXd coefd = VectorXd::Zero(N);
-coefd.head(N-1) = coef.tail(N-1).cwiseProduct(VectorXd::LinSpaced(N-1,1,N-1));
-return coefd;
-*/
 
 /* polyint : integrate a polynomial with constant of integration C. */
 VectorXd polyint(VectorXd const& coef, double C = 0) {
@@ -36,11 +39,25 @@ VectorXd polyint(VectorXd const& coef, double C = 0) {
   return coefi;
 };
 
+VectorXd polymult(VectorXd const& coef1, VectorXd const& coef2) {
+  // Note, this is using brute force multiplication.
+  int N1 = coef1.size();
+  int N2 = coef2.size();
+  VectorXd coef = VectorXd::Zero(N1+N2-1);
+  for (size_t i=0; i<N1; ++i) {
+    for (size_t j=0; j<N2; ++j) {
+      coef(i+j) += coef1(i) + coef2(j);
+    }
+  }
+  return coef;
+}
+
 /* polyval : evaluate a polynomial at xi */
 double polyval(VectorXd const& coef, double xi) {
   int N = coef.size();
-  double yi = coef(N-1);
+  if (N==1) return coef(0);
 
+  double yi = coef(N-1);
   for (int i=N-2; i>=0; --i) {
     yi = (yi*xi + coef(i));
   }
@@ -50,9 +67,7 @@ double polyval(VectorXd const& coef, double xi) {
 /* polyeval : compute all derivatives of a polynomial at xi (including the 0th
 derivative, which is just normal evaluation.) */
 VectorXd polyeval(VectorXd const& coef, double xi) {
-/* POLYEVAL Evaluate all derivatives of a polynomial at the point x0 and
-also return the coefficients of the polynomial with origin translated to
-x0.
+/* POLYEVAL Evaluate all derivatives of a polynomial at the point x0
 
 A_d = polyeval(A, x0)
 
@@ -68,7 +83,7 @@ A_d - numel(x0) x Na matrix where the i,j'th entry gives the
 
 Note. The coefficients of the polynomial relative to x0, that is
   A_x0(i,j) x^j = A_j (x + x0(i))^j
-are simply that A_x0(i) = A_d(i) / i!;
+are simply A_x0(i) = A_d(i) / i!;
 
 If you only need the value of the polynomial at x0, then it is faster to
 just use polyval(A,x0).
@@ -123,7 +138,7 @@ public:
   PP(VectorXd coef1) : coef({coef1}), knot(1e300) {}
   PP(VectorXd coef1, VectorXd coef2, double k) : coef({coef1, coef2}), knot(k) {}
 
-  double ppval(double xi) {
+  double ppval(double xi) const {
     if (coef.size() == 1) {
       return polyval(coef[0], xi);
     } else {
@@ -135,7 +150,7 @@ public:
     }
   }
 
-  VectorXd ppeval(double xi) {
+  VectorXd ppeval(double xi) const {
     if (coef.size() == 1) {
       return polyeval(coef[0], xi);
     } else {
@@ -147,7 +162,7 @@ public:
     }
   }
 
-  void display() {
+  void display() const {
     int N = coef.size();
     cout << "Piece-wise polynomial with " << N << " pieces :" << endl;
     for (int i = 0; i<N; ++i) {

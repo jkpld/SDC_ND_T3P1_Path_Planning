@@ -6,6 +6,34 @@
 #include <iostream>
 #include <algorithm>
 
+/* Contents
+
+class Trajectory - Wrapper of PP class (polynomial.h) that includes method
+  state_at(t) that returns a Vector3d giving the (position, speed, acceleration)
+  at time t.
+
+class State - Hold the state (position, speed, acceleration) for both
+  dimensions, and has a method get_trajectory() for returning a vector with two
+  Trajectory's, one for each dimension.
+
+enum class Modes - types of active modes
+
+struct ActiveMode - Hold active mode data as described in [1].
+
+struct SearchMode - Holds a vector of ActiveMode's along with a goal_lane.
+
+void ind2sub(N,idx,i,j) - Convert from linear index (idx) to sub-index (i,j)
+  given the number of rows in a matrix (N).
+
+vector sort_outer_sum(a,b) - Return the indices of the sorted matrix
+  C[i,j] = a[i]+b[j]
+
+class Rectangle - Class for a rotated rectangle with a method overlap() that
+  determines if two Rectangles overlap.
+
+*/
+
+
 using namespace Eigen;
 using namespace std;
 
@@ -16,7 +44,7 @@ public:
   Trajectory(VectorXd coef1) : PP(coef1) {};
   Trajectory(VectorXd coef1, VectorXd coef2, double k) : PP(coef1, coef2, k) {};
 
-  Vector3d state_at(double t) {
+  Vector3d state_at(double t) const {
     VectorXd s = ppeval(t);
 
     // Ensure the state has at least 3 elements.
@@ -37,7 +65,7 @@ public:
   State() : x(Vector3d::Zero()), y(Vector3d::Zero()) {};
   State(Vector3d x, Vector3d y) : x(x), y(y) {};
 
-  vector<Trajectory> get_trajectory() {
+  vector<Trajectory> get_trajectory() const {
     Vector3d xt = x;
     Vector3d yt = y;
     xt(2) *= 0.5;
@@ -45,19 +73,22 @@ public:
     return {Trajectory(xt),Trajectory(yt)};
   }
 
-  void display() {
+  void display() const {
     cout << "  x : " << x.transpose() << endl;
     cout << "  y : " << y.transpose() << endl;
   }
 };
 
+enum class Mode : char {FOLLOWING, MERGING, STOPPING, VELOCITY_KEEPING, LATERAL};
+
 struct ActiveMode {
-  string mode;
-  vector<double> state;
+  Mode mode;
+  vector<State> state;
   double number;
 
-  ActiveMode(string mode, vector<double> state) : mode(mode), state(state), number(0) {};
-  ActiveMode(string mode, double number) : mode(mode), number(number), state(vector<double>(3)) {};
+  ActiveMode(Mode mode, State state) : mode(mode), state({state}), number(0) {};
+  ActiveMode(Mode mode, vector<State> state) : mode(mode), state(state), number(0) {};
+  ActiveMode(Mode mode, double number) : mode(mode), number(number), state({State()}) {};
 };
 
 
@@ -74,7 +105,6 @@ void ind2sub(int const& size1, int const& idx, int& v1, int& v2) {
 
 
 vector<size_t> sort_outer_sum(const vector<double> &v, const vector<double> &v2) {
-
   // initialize original linear index locations
   auto N = v.size();
   vector<size_t> idx(N*v2.size());
@@ -126,7 +156,7 @@ public:
 
   MatrixXd operator()() {return bbox;}
 
-  bool overlap(Rectangle& rec2, bool exact = true) {
+  bool overlap(Rectangle& rec2, bool exact = true) const {
     // Determine if *this rectangle overlaps with rectangle rec2
     // If exact is false, then only the axis aligned bounding boxes will be
     // used to determine if they overlap. If exact is true, then we check to see
@@ -177,7 +207,6 @@ public:
       }
     }
   }
-
 
 private:
   double Length;

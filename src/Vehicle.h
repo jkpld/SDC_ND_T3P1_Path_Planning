@@ -33,7 +33,7 @@ public:
   Vehicle(double L, double W) : Vehicle(0, L, W) {};
   Vehicle(int id, double L, double W) : ID(id), Length(L), Width(W), t0(0), state(State()), trajectory(state.get_trajectory()) {};
 
-  void display() {
+  void display() const {
     cout << "Vehicle (ID : " << ID << ")" << endl;
     cout << " Length = " << Length << endl;
     cout << " Width = " << Width << endl;
@@ -62,6 +62,10 @@ public:
     Length = length;
     Width = width;
   }
+  // Get vehicle size
+  Vector2d get_size() const {
+    return (Vector2d()<<Length,Width).finished();
+  }
 
   /* Add new measurment of state, should be kalman filter, but simply estimates
     acceleration given the current and the last measurement (if not too
@@ -86,7 +90,7 @@ public:
   }
 
   // Return the cars bounding box at time t.
-  Rectangle bounding_box(double t, Vector2d safty_margin = Vector2d::Zero()) {
+  Rectangle bounding_box(double t, Vector2d safty_margin = Vector2d::Zero()) const {
     auto loc = location(t);
     return Rectangle(Length+safty_margin(0),
                      Width+safty_margin(1),
@@ -96,7 +100,11 @@ public:
   };
 
   template <typename T>
-  Rectangle bounding_box(double t, T& loc, Vector2d safty_margin = Vector2d::Zero()) {
+  Rectangle bounding_box(double t, const T& loc, Vector2d safty_margin = Vector2d::Zero()) const {
+    // This overloaded function is useful in trajecotry generation since we
+    // already have the locations computed there, before calling bounding_box
+    // to check collisions. (The "const" allows us to send a row of an eigen
+    // matrix MatrixXd locs ... bounding_box(t, locs.row(i), ...))
     return Rectangle(Length+safty_margin(0),
                      Width+safty_margin(1),
                      orientation(t),
@@ -104,7 +112,7 @@ public:
                      loc[1]);
   };
 
-  double orientation(double t) {
+  double orientation(double t) const {
     /* Orientation of vehicle at time t.
     The end state of a trajectory is zero acceleration, so we can get the
     orientation at any time after the knot by looking at the orientation just
@@ -121,18 +129,18 @@ public:
     return atan2(sy[1], sx[1]);
   };
 
-  State state_at(double t) {
+  State state_at(double t) const {
     return State(trajectory[0].state_at(t-t0), trajectory[1].state_at(t-t0));
   }
 
-  vector<double> location(double t) {
+  vector<double> location(double t) const {
     return {trajectory[0].ppval(t-t0), trajectory[1].ppval(t-t0)};
   }
 
   // Get the location at many times. The type could be VectorXd or a
   // vector<double>, for example.
   template <typename T>
-  vector<vector<double>> location(T t) {
+  vector<vector<double>> location(T t) const {
     vector<vector<double>> loc;
     for (int i = 0; i<t.size(); ++i) {
       loc.push_back(location(t(i)));
@@ -141,7 +149,7 @@ public:
   }
 
   template <typename T>
-  MatrixXd location_Eig(T t) {
+  MatrixXd location_Eig(T t) const {
     MatrixXd loc(t.size(),2);
     for (int i = 0; i<t.size(); ++i) {
       auto loc_i = location(t(i));
