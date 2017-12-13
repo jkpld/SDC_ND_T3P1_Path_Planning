@@ -111,24 +111,15 @@ public:
 
       This will allow for multiple evaluations using the same x_ii value, but
       only searching for the proper index once.
+      
       Ex.
-
-      pchip pp = pchip(x,y);
-      int idx = -1;
-      auto y_i = pp.evaluate(x_i, &idx); // computes the index and returns it in idx
-      // idx now gives the value of the index for x_i
-      auto yd_i = pp.evaluate_d(x_i, &idx); // does not need to compute the index again, but uses the value in idx
-
-      Ex 2.
       pchip ppx = pchip(t,x);
       pchip ppy = pchip(t,y);
 
       int idx = -1;
 
       auto x_i = ppx.evaluate(t_i, &idx); // computes the index
-      auto xd_i = ppx.evaluate_d(t_i, &idx); // uses the index already computed
       auto y_i = ppy.evaluate(t_i, &idx); // uses the index already computed
-      auto yd_i = ppy.evaluate_d(t_i, &idx); // uses the index already computed
     */
 
     int ii;

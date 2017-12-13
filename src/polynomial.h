@@ -91,8 +91,8 @@ James Kapaldo
   VectorXd fac = VectorXd::LinSpaced(N,0,N-1);
   VectorXd xip = VectorXd::Ones(N);
   fac(0) = 1;
-  xip(1) = xi;
   if (N>1) {
+    xip(1) = xi;
     for (int i=2; i<N; ++i) {
       fac(i) *= fac(i-1);
       xip(i) = xip(i-1)*xi;
@@ -119,7 +119,8 @@ public:
   vector<VectorXd> coef;
   double knot;
 
-  PP(VectorXd coef1) : coef({coef1}), knot(0) {}
+  PP() : coef({VectorXd::Zero(3)}), knot(1e300) {}
+  PP(VectorXd coef1) : coef({coef1}), knot(1e300) {}
   PP(VectorXd coef1, VectorXd coef2, double k) : coef({coef1, coef2}), knot(k) {}
 
   double ppval(double xi) {
@@ -143,6 +144,17 @@ public:
       } else {
         return polyeval(coef[0], xi);
       }
+    }
+  }
+
+  void display() {
+    int N = coef.size();
+    cout << "Piece-wise polynomial with " << N << " pieces :" << endl;
+    for (int i = 0; i<N; ++i) {
+      cout << "  Piece " << i+1 << ": " << coef[i].transpose() << endl;
+    }
+    if (N>1) {
+      cout << "  knot = " << knot << endl;
     }
   }
 };
