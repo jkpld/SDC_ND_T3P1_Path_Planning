@@ -9,12 +9,17 @@ a = (a0, a1, a2, a3, ..., an)
 A(x) = a(i)*x^i
 */
 
+#include "Eigen-3.3/Eigen/Eigenvalues"
 #include "Eigen-3.3/Eigen/Core"
 #include <math.h>
+#include <vector>
 #include <iostream>
 
-using namespace Eigen;
-using namespace std;
+using Eigen::MatrixXd;
+using Eigen::VectorXd;
+using Eigen::VectorXcd;
+using std::vector;
+
 
 /* polyder : compute the derivative of a polynomial. */
 VectorXd polyder(VectorXd const& coef, bool same_size = false) {
@@ -46,7 +51,7 @@ VectorXd polymult(VectorXd const& coef1, VectorXd const& coef2) {
   VectorXd coef = VectorXd::Zero(N1+N2-1);
   for (size_t i=0; i<N1; ++i) {
     for (size_t j=0; j<N2; ++j) {
-      coef(i+j) += coef1(i) + coef2(j);
+      coef(i+j) += coef1(i) * coef2(j);
     }
   }
   return coef;
@@ -64,9 +69,6 @@ double polyval(VectorXd const& coef, double xi) {
   return yi;
 };
 
-/* polyeval : compute all derivatives of a polynomial at xi (including the 0th
-derivative, which is just normal evaluation.) */
-VectorXd polyeval(VectorXd const& coef, double xi) {
 /* POLYEVAL Evaluate all derivatives of a polynomial at the point x0
 
 A_d = polyeval(A, x0)
@@ -100,6 +102,8 @@ d^nA/dx^n (x0) = b_j * j!
 
 James Kapaldo
 */
+VectorXd polyeval(VectorXd const& coef, double xi) {
+
   int N = coef.size();
 
   // Compute a factorial array and the powers of xi
@@ -127,6 +131,107 @@ James Kapaldo
   }
   return Ad;
 };
+
+/* realRoots - Return the real roots of a polynomial.
+
+Polynomial definision : vector of coeficients where the index is the same as
+the power. Example :
+
+a = (a0, a1, a2, a3, ..., an)
+A(x) = a(i)*x^i
+
+Note, this program is primarily insterested in returning the unique real.
+However, the array returned will not necessarily have only unique values. For
+example, if the polynomial has multiple leading zeros, then only one 0 root will
+be returned, not all of them.
+
+Based on Matlab's roots.m function() in that it computes the roots using the
+companion matrix. However, this function does not check for "virtual" infinities
+like Matlab.
+*/
+VectorXd realRoots(VectorXd const & coefs) {
+  bool DEBUG = false;
+  if (DEBUG) cout << "---------------- realRoots() --------------------" << endl;
+  if (DEBUG) cout << "   Coefs : " << coefs.transpose() << endl;
+  int N = coefs.size();
+
+  double tol = 1e-10;
+
+  if (N==1 || (coefs.array().abs() < tol).all()) {
+    // The polynomial is constant or all zeros, therefore there are no roots!
+    return VectorXd::Zero(0);
+  }
+
+  vector<double> a;
+
+  // Count leading zeros (and remove them)
+  int num_leading_zeros = 0;
+  bool is_leading_zero = true;
+  for (int i=0; i<N; ++i) {
+    if (fabs(coefs(i)) < tol && is_leading_zero) {
+      ++num_leading_zeros;
+    } else {
+      is_leading_zero = false;
+      a.push_back(coefs(i));
+    }
+  }
+
+  // Remove trailing zeros
+  for (int i=a.size()-1; i>0; --i) {
+    if (fabs(a[i]) < tol) {
+      a.pop_back();
+    } else {
+      break;
+    }
+  }
+
+  // If there is only one non-zero value at this point, then there is a root at
+  // 0. Ex. coef = (0,0,3,0) => A(x) = 3x^2;
+  if (a.size()<2) return VectorXd::Zero(1);
+
+  if (DEBUG) cout << "   Coef after removing trailing/leading zeros : " << endl;
+  if (DEBUG) {
+    cout << "      ";
+    for (int i=0; i<a.size(); ++i) cout << a[i] << " ";
+    cout << endl;
+  }
+  // Form the companion matrix
+  N = a.size() - 1;
+  MatrixXd C = MatrixXd::Zero(N, N);
+
+  C.block(1,0,N-1,N-1) = MatrixXd::Identity(N-1,N-1);
+
+  for (int i = 0; i<N; ++i) {
+    C(i, N-1) = -a[i]/a.back();
+  }
+
+  if (DEBUG) cout << "   Companion matrix : " << endl;
+  if (DEBUG) cout << C << endl;
+
+  // Compute the eigenvalues, which are the polynomial roots.
+  VectorXcd V = C.eigenvalues();
+
+  // Keep real roots, and add in any zero roots caused by leading zeros
+  auto Vi = V.imag().array().abs();
+  auto Vr = V.real();
+
+  vector<double> roots;
+  for (int i=0; i<Vi.size(); ++i) {
+    if (Vi(i) < tol) {
+      roots.push_back(Vr(i));
+    }
+  }
+
+  // If there was a leading zero then add on a 0 root.
+  if (num_leading_zeros) roots.push_back(0);
+
+  // Convert the roots vector to a VectorXd
+  VectorXd r(roots.size());
+  for (int i=0; i<roots.size(); ++i) {
+    r(i) = roots[i];
+  }
+  return r;
+}
 
 /* PP : Very simple piece-wise polynomial class for only 2 pieces. */
 class PP {
@@ -164,12 +269,12 @@ public:
 
   void display() const {
     int N = coef.size();
-    cout << "Piece-wise polynomial with " << N << " pieces :" << endl;
+    std::cout << "Piece-wise polynomial with " << N << " pieces :" << std::endl;
     for (int i = 0; i<N; ++i) {
-      cout << "  Piece " << i+1 << ": " << coef[i].transpose() << endl;
+      std::cout << "  Piece " << i+1 << ": " << coef[i].transpose() << std::endl;
     }
     if (N>1) {
-      cout << "  knot = " << knot << endl;
+      std::cout << "  knot = " << knot << std::endl;
     }
   }
 };
