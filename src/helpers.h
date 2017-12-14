@@ -231,7 +231,7 @@ private:
     Array2d lw;
     lw << Length, Width;
 
-    bbox_centered = (bbox_verts.array().colwise() * lw).matrix();
+    bbox_centered = (bbox_verts.array().colwise() * lw * 0.5).matrix();
     set_bbox_rotation();
     set_bbox_center();
   }

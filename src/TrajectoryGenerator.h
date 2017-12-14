@@ -22,7 +22,13 @@ using namespace std;
 
 namespace JMTG {
 
-  bool DEBUG = false;
+  /* DEBUG level (instead of a logger, which would be nicer)
+  999 : no debug
+  1 : full debug, some sort of output from most functions
+  2 : return lateral trajectories with cost, and longitudinal trajectories with
+      cost
+  */
+  int DEBUG = 2;
 
   /* Weights for cost function, as defined in the paper [1]*/
   double kj = 1; // weight for the jerk cost
@@ -76,7 +82,7 @@ namespace JMTG {
       // A*c + s0(T) = s1;
       // c = A.inv() *(s1 - s0(T))
 
-      if (DEBUG) cout << endl <<"----------------------- JMT ----------------------" << endl;
+      if (DEBUG <= 1) cout << endl <<"----------------------- JMT ----------------------" << endl;
       double T2 = T*T;
       double T3 = T2*T;
       double T4 = T3*T;
@@ -93,7 +99,7 @@ namespace JMTG {
       // Solve for c, and return the position polynomial.
       VectorXd coef(6);
       coef << s0, A.inverse()*B;
-      if (DEBUG) cout << "   Polynomial coefs : " << coef.transpose() << endl;
+      if (DEBUG <= 1) cout << "   Polynomial coefs : " << coef.transpose() << endl;
       return coef;
     };
 
@@ -102,7 +108,7 @@ namespace JMTG {
       // solve for the coefficients of the first derivative, and then integrate
       // to get the position polynomial.
 
-      if (DEBUG) cout << "-------------------- JMT_vel_keep ----------------" << endl;
+      if (DEBUG <= 1) cout << "-------------------- JMT_vel_keep ----------------" << endl;
       double T2 = T*T;
       double T3 = T2*T;
 
@@ -119,18 +125,17 @@ namespace JMTG {
 
       // Now integrate to get the position polynomial.
       VectorXd coef = polyint(coef_d, s0(1));
-      if (DEBUG) cout << "   Polynomial coefs : " << coef.transpose() << endl;
+      if (DEBUG <= 1) cout << "   Polynomial coefs : " << coef.transpose() << endl;
       return coef;
     };
 
     bool compute_validity(VectorXd const& coefs, double T) {
       // Determine if a trajectory is valid by ensuring that the speed,
       // acceleration, and jerk are all below the maximum allowed values.
-      bool DEBUG = false;
-      if (DEBUG) cout << "--------------- compute_validity ----------------" << endl;
+      if (DEBUG <= 1) cout << "--------------- compute_validity ----------------" << endl;
       ArrayXf max_vals(3);
       max_vals << Max_Speed, Max_Accel, Max_Jerk;
-      if (DEBUG) cout << "   Coefs : " << coefs.transpose() << endl;
+      if (DEBUG <= 1) cout << "   Coefs : " << coefs.transpose() << endl;
 
       double tol = 1e-10;
 
@@ -140,14 +145,14 @@ namespace JMTG {
       VectorXd p = polyder(coefs);
       if ((p.array().abs() < tol).all()) return true; // If all values are zero, then it is valid.
 
-      if (DEBUG) cout << "   1st derivative : " << p.transpose() << endl;
+      if (DEBUG <= 1) cout << "   1st derivative : " << p.transpose() << endl;
       for (size_t j=0; j<3; ++j) {
         VectorXd pp = polyder(p);
         if ((pp.array().abs() < tol).all()) return true; // If all values are zero, then it is valid.
 
-        if (DEBUG) cout << "   " << j+2 << "th derivative : " << pp.transpose() << endl;
+        if (DEBUG <= 1) cout << "   " << j+2 << "th derivative : " << pp.transpose() << endl;
         VectorXd r = realRoots(pp);
-        if (DEBUG) cout << "   Roots of " << j+2 << "th derivative : " << r.transpose() << endl;
+        if (DEBUG <= 1) cout << "   Roots of " << j+2 << "th derivative : " << r.transpose() << endl;
         // Maximum value at roots in range [0,T].
         double max_val = 0;
         for (size_t ri=0; ri<r.size(); ++ri) {
@@ -159,9 +164,9 @@ namespace JMTG {
         max_val = max(max_val,fabs(polyval(p,0)));
         max_val = max(max_val,fabs(polyval(p,T)));
 
-        if (DEBUG) cout << "   Maximum value of " << j+1 << "th derivative : " << max_val << endl;
+        if (DEBUG <= 1) cout << "   Maximum value of " << j+1 << "th derivative : " << max_val << endl;
         if (max_val > max_vals(j)) {
-          if (DEBUG) cout << "----------------- NOT VALID ----------------------" << endl;
+          if (DEBUG <= 1) cout << "----------------- NOT VALID ----------------------" << endl;
           return false;
         }
         p = pp;
@@ -172,14 +177,14 @@ namespace JMTG {
 
     double compute_cost(VectorXd const& coefs, double T, Vector3d const& s1, Trajectory const& target, Mode mode) {
 
-      if (DEBUG) cout << "----------------- compute_cost -------------------" << endl;
+      if (DEBUG <= 1) cout << "----------------- compute_cost -------------------" << endl;
       // Jerk cost, Cj
       VectorXd p3 = polyder(polyder(polyder(coefs))); // jerk
-      if (DEBUG) cout << "   p''' : " << p3.transpose() << endl << endl;
+      if (DEBUG <= 1) cout << "   p''' : " << p3.transpose() << endl << endl;
       VectorXd int_p32 = polyint(polymult(p3,p3)); // integral of jerk^2
-      if (DEBUG) cout << "   /  " << endl;
-      if (DEBUG) cout << "   | (p''')^2 dt : " << int_p32.transpose() << endl;
-      if (DEBUG) cout << "   /  " << endl;
+      if (DEBUG <= 1) cout << "   /  " << endl;
+      if (DEBUG <= 1) cout << "   | (p''')^2 dt : " << int_p32.transpose() << endl;
+      if (DEBUG <= 1) cout << "   /  " << endl;
       double Cj = kj * polyval(int_p32,T); // jerk cost
 
       // Time cost
@@ -194,15 +199,15 @@ namespace JMTG {
         case Mode::MERGING:
         case Mode::STOPPING:
           Cd = ks * pow(s1(0) - targ(0),2);
-          if (DEBUG) cout << "   Following/Merging/Stopping cost : " << Cd << endl;
+          if (DEBUG <= 1) cout << "   Following/Merging/Stopping cost : " << Cd << endl;
           break;
         case Mode::VELOCITY_KEEPING:
           Cd = ksd * pow(s1(1) - targ(1),2);
-          if (DEBUG) cout << "   Velocity keeping cost : " << Cd << endl;
+          if (DEBUG <= 1) cout << "   Velocity keeping cost : " << Cd << endl;
           break;
         case Mode::LATERAL:
-          Cd = kd * s1(0)*s1(0);
-          if (DEBUG) cout << "   Lateral cost : " << Cd << endl;
+          Cd = kd * pow(fmod(s1(0),Lane_Width),2);
+          if (DEBUG <= 1) cout << "   Lateral cost : " << Cd << endl;
           break;
       }
 
@@ -211,7 +216,7 @@ namespace JMTG {
 
       // Multiply by lateral, longitudinal weight
       cost *= (mode == Mode::LATERAL) ? k_lat : k_lon;
-      if (DEBUG) cout << "---------- cost = " << cost << " --------------------" << endl;
+      if (DEBUG <= 1) cout << "---------- cost = " << cost << " --------------------" << endl;
       return cost;
     };
 
@@ -239,7 +244,7 @@ namespace JMTG {
 
     void lateral(State const& state0, double const& goal_lane, ArrayXd const& search_d, vector<Trajectory>& trajs, vector<double>& costs) {
 
-      if (DEBUG) cout << "--------------  lateral --------------------------" << endl;
+      if (DEBUG <= 1) cout << "--------------  lateral --------------------------" << endl;
       // Initial lateral state.
       Vector3d d0 = state0.y;
 
@@ -248,12 +253,12 @@ namespace JMTG {
       Vector3d dg;
       dg << d_goal, 0, 0;
 
-      if (DEBUG) cout << "   Goal state : " << dg.transpose() << endl;
+      if (DEBUG <= 1) cout << "   Goal state : " << dg.transpose() << endl;
 
       // The search d values.
       ArrayXd d = search_d + d_goal;
 
-      if (DEBUG) cout << "   Search d-values : " << d.transpose() << endl;
+      if (DEBUG <= 1) cout << "   Search d-values : " << d.transpose() << endl;
 
       for (int di =0 ; di<search_d.size(); ++di) {
         // Do not search for any trajectory that takes us off the road.
@@ -310,16 +315,16 @@ namespace JMTG {
     };
 
     void velocity_keeping(State const& state0, double sd, ArrayXd const& search_sd, vector<Trajectory>& trajs, vector<double>& costs) {
-      if (DEBUG) cout << "----------------- velocity_keeping -----------------" << endl;
+      if (DEBUG <= 1) cout << "----------------- velocity_keeping -----------------" << endl;
       Vector3d s0 = state0.x;
       ArrayXd s_dot = search_sd + sd;
 
-      if (DEBUG) cout << "   Search s_dot-values : " << s_dot.transpose() << endl;
+      if (DEBUG <= 1) cout << "   Search s_dot-values : " << s_dot.transpose() << endl;
 
       // Target trajectory is simply one with a speed of sd.
       Trajectory target((Vector3d()<<0,sd,0).finished());
 
-      if (DEBUG) {
+      if (DEBUG <= 1) {
         cout << "   Goal target : ";
         target.display();
       }
@@ -345,11 +350,11 @@ namespace JMTG {
 
     bool detect_collision(Vehicle& ego, vector<Vehicle> const& cars, MatrixXd car_traj, VectorXd t, VectorXd min_collision_free_dist){
 
-      if (DEBUG) cout << "----------------- detect_collision -----------------" << endl;
+      if (DEBUG <= 1) cout << "----------------- detect_collision -----------------" << endl;
       // NOTE: I am using just axis aligned bounding box instead of the exact
       // bounding box. Switch to object aligned bounding box by chaning this flag
       // to true;
-      bool OA_DETECTION = false;
+      bool OA_DETECTION = true;
 
       int Nc = cars.size();
       int Nt = t.size();
@@ -378,9 +383,25 @@ namespace JMTG {
         for (int ct_i=0; ct_i<idx.size(); ++ct_i) {
           int ti,ci;
           ind2sub(Nt,idx[ct_i],ti,ci);
-          Rectangle rec1 = ego.bounding_box(t(ti), ego_traj.row(ti), Safty_Margin);
-          Rectangle rec2 = ego.bounding_box(t(ti), car_traj.row(ci*Nt+ti), Safty_Margin);
-          if (rec1.overlap(rec2, OA_DETECTION)) return true;
+          Rectangle rec1 = ego.bounding_box(t(ti), ego_traj.row(ti), 2*Safty_Margin);
+          Rectangle rec2 = cars[ci].bounding_box(t(ti), car_traj.row(ci*Nt+ti), 2*Safty_Margin);
+          if (rec1.overlap(rec2, OA_DETECTION)) {
+            if (DEBUG <= 2) {
+
+              cout << "        ___________________________" << endl;
+              cout << "       | Collision detected" << endl;
+              cout << "       |   ego bbox :" << endl;
+              cout << "       |      center = " << ego_traj.row(ti) << endl;
+              cout << "       |      x_vert = " << rec1().row(0) << endl;
+              cout << "       |      y_vert = " << rec1().row(1) << endl;
+              cout << "       |   car bbox :" << endl;
+              cout << "       |      center = " << car_traj.row(ci*Nt+ti) << endl;
+              cout << "       |      x_vert = " << rec2().row(0) << endl;
+              cout << "       |      y_vert = " << rec2().row(1) << endl;
+              cout << "       |__________________________" << endl;
+            }
+            return true;
+          }
         }
       }
       return false;
@@ -388,50 +409,71 @@ namespace JMTG {
 
     bool generate_(Vehicle& ego, vector<Vehicle> const& cars, SearchMode const& SM, ArrayXd const& search_d, ArrayXd const& search_sd) {
 
-
-
       vector<Trajectory> trajs_d, trajs_s;
       vector<double> costs_d, costs_s;
       State state0 = ego.state;
 
       // Search for the lateral trajectory
       lateral(state0, SM.goal_lane, search_d, trajs_d, costs_d);
-      if (DEBUG) cout << "Finished lateral ---------------------------------" << endl;
-      if (DEBUG) cout << "   " << trajs_d.size() << " trajectories are valid" << endl;
+      if (DEBUG <= 1) cout << "Finished lateral ---------------------------------" << endl;
+      if (DEBUG <= 1) cout << "   " << trajs_d.size() << " trajectories are valid" << endl;
       // If there were no valid lateral trajectories, then return false
       if (trajs_d.empty()) {
-        if (DEBUG) cout << "   No valid lateral trajectories found!" << endl;
+        if (DEBUG <= 1) cout << "   No valid lateral trajectories found!" << endl;
         return false;
+      } else {
+        // output debug messages
+        if (DEBUG <= 2) {
+          cout << "--------------------------------------------------" << endl;
+          for (int i = 0; i<trajs_d.size(); ++i) {
+            cout << "   Lateral trajectory " << i << " : (states) " << endl;
+            cout << "      start : " << trajs_d[i].state_at(0).transpose() << endl;
+            cout << "      end   : " << trajs_d[i].state_at(trajs_d[i].knot).transpose() << endl;
+            cout << "      cost  : " << costs_d[i] << endl;
+          }
+        }
       }
 
       // Search for the longitudinal trajectories
-      if (DEBUG) cout << "Starting longitudinal search ---------------------" << endl;
+      if (DEBUG <= 1) cout << "Starting longitudinal search ---------------------" << endl;
       for (int i=0; i<SM.activeModes.size(); ++i) {
         Mode mode = SM.activeModes[i].mode;
         if (mode == Mode::FOLLOWING ) {
-          if (DEBUG) cout << "   Mode : FOLLOWING" << endl;
+          if (DEBUG <= 1) cout << "   Mode : FOLLOWING" << endl;
           following(state0, SM.activeModes[i].state[0], trajs_s, costs_s);
         } else if (mode == Mode::MERGING ) {
-          if (DEBUG) cout << "   Mode : MERGING" << endl;
+          if (DEBUG <= 1) cout << "   Mode : MERGING" << endl;
           merging(state0, SM.activeModes[i].state[0], SM.activeModes[i].state[1], trajs_s, costs_s);
         } else if (mode == Mode::STOPPING ) {
-          if (DEBUG) cout << "   Mode : STOPPING" << endl;
+          if (DEBUG <= 1) cout << "   Mode : STOPPING" << endl;
           stopping(state0, SM.activeModes[i].number, trajs_s, costs_s);
         } else if (mode == Mode::VELOCITY_KEEPING ) {
-          if (DEBUG) cout << "   Mode : VELOCITY_KEEPING" << endl;
+          if (DEBUG <= 1) cout << "   Mode : VELOCITY_KEEPING" << endl;
           velocity_keeping(state0, SM.activeModes[i].number, search_sd, trajs_s, costs_s);
         }
       }
 
-      if (DEBUG) cout << "Finished longitudinal ----------------------------" << endl;
-      if (DEBUG) cout << "   " << trajs_s.size() << " trajectories are valid" << endl;
+      if (DEBUG <= 1) cout << "Finished longitudinal ----------------------------" << endl;
+      if (DEBUG <= 1) cout << "   " << trajs_s.size() << " trajectories are valid" << endl;
       if (trajs_s.empty()) {
         cout << "No longitudinal trajectories found!" << endl;
         return false;
+      } else {
+        // output debug messages
+        if (DEBUG <= 2) {
+          cout << "--------------------------------------------------" << endl;
+          for (int i = 0; i<trajs_s.size(); ++i) {
+            cout << "   Longitudinal trajectory " << i << " : (states) " << endl;
+            cout << "      start : " << trajs_s[i].state_at(0).transpose() << endl;
+            cout << "      end   : " << trajs_s[i].state_at(trajs_s[i].knot).transpose() << endl;
+            cout << "      cost  : " << costs_s[i] << endl;
+          }
+
+        }
       }
 
       /* Get the linear index of the combination of lateral trajectories with
-       longitudinal trajectories. Ex.
+       longitudinal trajectories with the lowest costs. Ex.
 
        The outer sum of the costs C[i,j] = costs_d[i] + costs_s[j].
        Sort this matrix and return the linear indices to the costs C[i,j] in
@@ -454,13 +496,13 @@ namespace JMTG {
         // with the cars, and use the first combination that does not have any
         // collisions.
 
-        if (DEBUG) cout << "Starting search for best traj without collisions -" << endl;
+        if (DEBUG <= 2) cout << "Starting search for best traj without collisions -" << endl;
         int Nt = ceil(Time_Horizon / 0.2) + 1;
         int Nc = cars.size();
-        if (DEBUG) cout << "   Nt = " << Nt << endl;
-        if (DEBUG) cout << "   Nc = " << Nc << endl;
-        if (DEBUG) cout << "   Ns = " << Ns << endl;
-        if (DEBUG) cout << "   Nd = " << Nd << endl;
+        if (DEBUG <= 1) cout << "   Nt = " << Nt << endl;
+        if (DEBUG <= 1) cout << "   Nc = " << Nc << endl;
+        if (DEBUG <= 1) cout << "   Ns = " << Ns << endl;
+        if (DEBUG <= 1) cout << "   Nd = " << Nd << endl;
 
         // Construct the car trajectories for collision detection and the minimum
         // distance between ego and each car at which there cannot be a collision
@@ -468,30 +510,25 @@ namespace JMTG {
         MatrixXd car_traj(Nc*Nt, 2); // initialize matrix for storing car paths
         ArrayXd min_collision_free_dist(Nc);
 
-        if (DEBUG) cout << "Collision detection times : "<< t.transpose() << endl;
-        if (DEBUG) cout << "Computing car trajectories ("<<Nc*Nt<<" x 2)------------------" << endl;
+        if (DEBUG <= 1) cout << "Collision detection times : "<< t.transpose() << endl;
         for (int ci=0; ci<Nc; ++ci) {
           // get the car locations
-          if (DEBUG) cout << "ci*Nt = " << ci*Nt << endl;
+
           MatrixXd ego_loc = cars[ci].location_Eig(t);
-          if (DEBUG) cout << "Ego location size = (" << ego_loc.rows() << " x " << ego_loc.cols() << ")" << endl;
           car_traj.block(ci*Nt,0,Nt,2) << ego_loc;
 
           // half diagonal of the car
-          if (DEBUG) cout << "Car diagonal = " << (cars[ci].get_size()/2 + Safty_Margin).norm() << endl;
           min_collision_free_dist(ci) = (cars[ci].get_size()/2 + Safty_Margin).norm();
         }
         min_collision_free_dist += (ego.get_size()/2 + Safty_Margin).norm(); // add the half diagonal of ego
         min_collision_free_dist *= min_collision_free_dist; // square it so later we don't have to take square roots of the distances between the cars.
-
-        if (DEBUG) cout << "   Finished" << endl;
 
         bool collide = false;
         for (int ds_i=0; ds_i<Nd*Ns; ++ds_i) {
           // Get the indices of the current trajectory combination
           int di,si;
           ind2sub(Nd, idx[ds_i], di, si);
-          if (DEBUG) cout << "   [" << di << "," << si << "] = ind2sub("<<Nd<<","<<idx[ds_i]<<")" << endl;
+          if (DEBUG <= 2) cout << "   Trajectory : di= " << di << ", si=" << si <<", cost = "<< costs_s[si] + costs_d[di] << endl;
           // Set ego's trajectory
           ego.set_trajectory({trajs_s[si], trajs_d[di]});
 
@@ -513,7 +550,14 @@ namespace JMTG {
   };
 
   bool reactive(Vehicle& ego, vector<Vehicle> const& cars) {
-    return true;
+    double v_ref = Max_Speed * 0.95;
+    ActiveMode aM(Mode::VELOCITY_KEEPING, v_ref);
+    SearchMode sM(aM, 2);
+
+    ArrayXd d_search = ArrayXd::LinSpaced(7,-6,6);
+    ArrayXd sd_search = ArrayXd::LinSpaced(7,-12,0);
+
+    return INTERNAL::generate_(ego, cars, sM, d_search, sd_search);
   };
 
   /* Generate the best trajectory for ego using the SearchMode while preventing
