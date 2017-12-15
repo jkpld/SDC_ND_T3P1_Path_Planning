@@ -14,8 +14,12 @@
 
 #include "json.hpp"
 
-using namespace std;
+// using namespace std;
 using namespace Eigen;
+
+using std::vector;
+using std::string;
+
 using json = nlohmann::json;
 
 const bool BETTER_FRENET_APPROX = true;
@@ -62,7 +66,9 @@ public:
   virtual ~RoadMap();
 
   void LoadWaypoints(string map_file);
-
+  Matrix2d TransformMat_C2F(double s);
+  Matrix2d TransformMat_F2C(double s);
+  vector<double> getXY(double s, double d);
   /* Cartesian_to_Frenet - Take in a vehicle state (t,x,y,vx,vy,ax,ay) and
     return the state in Frenet coordinates (t,s,d,vs,vd,as,ad)
     state : veicle state, 7 element vector (t,x,y,vx,vy,ax,zy)

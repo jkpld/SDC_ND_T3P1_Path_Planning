@@ -7,7 +7,11 @@
 #include <iostream>
 
 // using namespace Eigen;
-using namespace std;
+// using namespace std;
+
+using std::vector;
+using std::cout;
+using std::endl;
 
 class pchip {
 public:
@@ -111,7 +115,7 @@ public:
 
       This will allow for multiple evaluations using the same x_ii value, but
       only searching for the proper index once.
-      
+
       Ex.
       pchip ppx = pchip(t,x);
       pchip ppy = pchip(t,y);
@@ -134,8 +138,8 @@ public:
     // if the index value given is less than 0, then compute the proper index
     if (ii < 0) {
       vector<double>::const_iterator it;
-      it = lower_bound(x.begin(),x.end(),x_ii);
-      ii = max( int(it-x.begin())-1, 0);
+      it = std::lower_bound(x.begin(),x.end(),x_ii);
+      ii = std::max( int(it-x.begin())-1, 0);
 
       // if an index value was given, overwrite it with the proper index
       if (idx) {

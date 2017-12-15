@@ -7,18 +7,24 @@ Generation for Dynamic Street Senarios in the Frenet Frame". (This will be
 sited as [1].)
 */
 
+
 #include <iostream>
 #include <vector>
-#include <algorithm>
 #include <math.h>
+#include <algorithm>
+
 #include "Eigen-3.3/Eigen/Core"
-#include "polynomial.h"
 #include "helpers.h"
+#include "polynomial.h"
 #include "Vehicle.h"
 
 
 using namespace Eigen;
-using namespace std;
+// using namespace std;
+
+using std::cout;
+using std::endl;
+using std::vector;
 
 namespace JMTG {
 
@@ -28,7 +34,7 @@ namespace JMTG {
   2 : return lateral trajectories with cost, and longitudinal trajectories with
       cost
   */
-  int DEBUG = 2;
+  int DEBUG = 999;
 
   /* Weights for cost function, as defined in the paper [1]*/
   double kj = 1; // weight for the jerk cost
@@ -67,7 +73,7 @@ namespace JMTG {
   double Reactive_Layer_Time_Horizon = 3;
 
   /* Properties controling the search values for the new trajectories */
-  ArrayXd T_ = ArrayXd::LinSpaced(3,1,3); // times used in searching for new trajectories
+  ArrayXd T_ = ArrayXd::LinSpaced(6,0.5,3); // times used in searching for new trajectories
   ArrayXd ds_ = ArrayXd::LinSpaced(11,-5,5); // offset longitudinal distances
   ArrayXd dsd_ = ArrayXd::LinSpaced(5,-2,2); // offset speeds
   ArrayXd d_ = ArrayXd::LinSpaced(3,-1,1); // offset lateral distances
@@ -124,7 +130,7 @@ namespace JMTG {
       coef_d << s0(1), s0(2), A.inverse()*b;
 
       // Now integrate to get the position polynomial.
-      VectorXd coef = polyint(coef_d, s0(1));
+      VectorXd coef = polyint(coef_d, s0(0));
       if (DEBUG <= 1) cout << "   Polynomial coefs : " << coef.transpose() << endl;
       return coef;
     };
@@ -157,12 +163,12 @@ namespace JMTG {
         double max_val = 0;
         for (size_t ri=0; ri<r.size(); ++ri) {
           if (r(ri) < 0 || r(ri) > T) continue;
-          max_val = max(max_val,fabs(polyval(p,r(ri))));
+          max_val = std::max(max_val, std::fabs(polyval(p,r(ri))));
         }
 
         // Maximum value at end points.
-        max_val = max(max_val,fabs(polyval(p,0)));
-        max_val = max(max_val,fabs(polyval(p,T)));
+        max_val = std::max(max_val, std::fabs(polyval(p,0)));
+        max_val = std::max(max_val, std::fabs(polyval(p,T)));
 
         if (DEBUG <= 1) cout << "   Maximum value of " << j+1 << "th derivative : " << max_val << endl;
         if (max_val > max_vals(j)) {
@@ -371,14 +377,14 @@ namespace JMTG {
       if (C.any()) {
         // Get the indices of the points we must check
         VectorXi idx = VectorXi::LinSpaced(C.size(),0,C.size()-1);
-        idx.conservativeResize(stable_partition(idx.data(), idx.data()+idx.size(), [&C](int i){return C(i);})-idx.data());
+        idx.conservativeResize(std::stable_partition(idx.data(), idx.data()+idx.size(), [&C](int i){return C(i);})-idx.data());
 
         // We have to check all of these points for a collision, however, we can
         // stop checking upon the first detected collision. Therefore, first sort
         // the indices in ascending order of the distance, and start going through
         // the points from the closest. This should help reduce work when there is
         // a collision.
-        sort(idx.data(), idx.data()+idx.size(), [&dist](size_t i1, size_t i2) {return dist(i1) < dist(i2);});
+        std::sort(idx.data(), idx.data()+idx.size(), [&dist](size_t i1, size_t i2) {return dist(i1) < dist(i2);});
 
         for (int ct_i=0; ct_i<idx.size(); ++ct_i) {
           int ti,ci;
@@ -550,12 +556,13 @@ namespace JMTG {
   };
 
   bool reactive(Vehicle& ego, vector<Vehicle> const& cars) {
-    double v_ref = Max_Speed * 0.95;
+    double v_ref = Max_Speed * 0.85;
     ActiveMode aM(Mode::VELOCITY_KEEPING, v_ref);
     SearchMode sM(aM, 2);
 
-    ArrayXd d_search = ArrayXd::LinSpaced(7,-6,6);
-    ArrayXd sd_search = ArrayXd::LinSpaced(7,-12,0);
+    ArrayXd d_search(9);// = ArrayXd::LinSpaced(7,-6,6);
+    ArrayXd sd_search = ArrayXd::LinSpaced(8,-14,0);
+    d_search << -5,-4,-3,-1,0,1,3,4,5;//
 
     return INTERNAL::generate_(ego, cars, sM, d_search, sd_search);
   };

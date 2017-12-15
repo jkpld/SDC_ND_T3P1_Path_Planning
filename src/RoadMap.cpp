@@ -19,11 +19,11 @@ void RoadMap::LoadWaypoints(string map_file) {
   // The max s value before wrapping around the track back to 0
   double max_s = 6945.554;
 
-  ifstream in_map_(map_file.c_str(), ifstream::in);
+  std::ifstream in_map_(map_file.c_str(), std::ifstream::in);
 
   string line;
   while (getline(in_map_, line)) {
-  	istringstream iss(line);
+  	std::istringstream iss(line);
   	double x,y;
   	float s, dx, dy;
   	iss >> x;
@@ -165,6 +165,55 @@ vector<Matrix2d> RoadMap::ComputeTransformMatrices(int wp0i, int wp1i, VectorXd 
   F2C  = C2F.inverse();
 
   return {C2F, F2C};
+}
+
+vector<double> RoadMap::getXY(double s, double d) {
+  int idx = -1;
+  vector<double> x_dat = x_road.evaluate(s, &idx);
+  vector<double> y_dat = y_road.evaluate(s, &idx);
+
+  Vector2d r;
+  r << x_dat[0], y_dat[0];
+
+  // road tangent vector
+  Vector2d t;
+  t << x_dat[1], y_dat[1];
+  t /= t.norm();
+
+  // road normal vector
+  Vector2d n;
+  n << t(1), -t(0);
+
+  r += d*n;
+
+  return {r(0), r(1)};
+}
+
+Matrix2d RoadMap::TransformMat_C2F(double s) {
+  // get x, x', y, y' of the road center line for the current s location
+  int idx = -1;
+  vector<double> x_dat = x_road.evaluate(s, &idx);
+  vector<double> y_dat = y_road.evaluate(s, &idx);
+
+  // road tangent vector
+  Vector2d t;
+  t << x_dat[1], y_dat[1];
+  t /= t.norm();
+
+  // road normal vector
+  Vector2d n;
+  n << t(1), -t(0);
+
+  Matrix2d C2F;
+  C2F << t.transpose(), n.transpose();
+
+  return C2F;
+}
+
+Matrix2d RoadMap::TransformMat_F2C(double s) {
+  Matrix2d C2F = TransformMat_C2F(s);
+  Matrix2d F2C = C2F.inverse();
+  return F2C;
 }
 
 // Transform from Frenet s,d coordinates to Cartesian x,y coordinates

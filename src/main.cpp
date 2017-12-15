@@ -5,21 +5,28 @@
 #include <iostream>
 #include <thread>
 #include <vector>
+#include <map>
+#include <string>
+#include <cassert>
+
 #include "Eigen-3.3/Eigen/Core"
 #include "Eigen-3.3/Eigen/QR"
 #include "json.hpp"
+
+#include "helpers.h"
+#include "TrajectoryGenerator.h"
 #include "Vehicle.h"
-#include <map>
 #include "RoadMap.h"
-#include "VisualDebugger.h"
-#include "PTG.h"
-#include "Trajectory.h"
-// #include "TrajectoryCost.h"
 
 using namespace std;
 
 // for convenience
 using json = nlohmann::json;
+
+double TIME_STEP = 0.02;
+double REPLANNING_TIME = 0.6;
+double PLAN_HORIZON = 1;
+double CONSIDER_DISTANCE = 50;
 
 // For converting back and forth between radians and degrees.
 constexpr double pi() { return M_PI; }
@@ -45,31 +52,24 @@ string hasData(string s) {
 chrono::high_resolution_clock::time_point start_timer() {
     return chrono::high_resolution_clock::now();
 }
-
 double stop_timer (chrono::high_resolution_clock::time_point &start) {
     double duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start).count();
     return duration;
 };
 
-VisualDebugger plotter;
-
 int main() {
   uWS::Hub h;
 
   // Initialize road
-  RoadMap road = RoadMap("../data/highway_map.csv");
-  plotter.CordSys = VisualDebugger::CARTESIAN;
+  RoadMap road("../data/highway_map.csv");
 
   map<int, Vehicle> cars;
-  auto startTime = start_timer();
-  Vehicle ego = Vehicle(road, 0);
-  Vehicle target = Vehicle(road);
-  vector<double> end_state(7,0);
-  PTG ptg;
+  Vehicle ego(0);
+  vector<Trajectory> end_traj;
 
-  bool first_call = true;
+  auto start_time = start_timer();
 
-  h.onMessage([&road, &cars, &ego, &startTime, &ptg, &end_state, &target, &first_call](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&road, &cars, &ego, &end_traj, &start_time](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -84,200 +84,151 @@ int main() {
 
         if (event == "telemetry") {
 
-          /* --------------------------------------------------------------- */
-        	/* Update main car's state */
-          /* --------------------------------------------------------------- */
-          if (first_call) {
-            startTime = start_timer();
-            // first_call = false;
-          }
-
-
-        	double car_x = j[1]["x"];
-        	double car_y = j[1]["y"];
-        	double car_s = j[1]["s"];
-        	double car_d = j[1]["d"];
-        	double car_yaw = j[1]["yaw"];
-        	double car_speed = j[1]["speed"];
-          double t0 = stop_timer(startTime);
-
-          car_speed = car_speed*0.44704; // convert to m/s
-          car_yaw = deg2rad(car_yaw);
-
-
-          ego.pushState({t0, car_x, car_y, car_speed*cos(car_yaw), car_speed*sin(car_yaw)});
-
-          // if (first_call) {
-            vector<double> state0 = {t0, ego.state[1], 6, 20, 0, 0, 0};
-            target.set_state(state0);
-          // }
-
-          auto state1 = target.traj.evaluate_state(20.0);
-          // state1[0] += t0;
-          Vehicle target2 = target;
-          target2.set_state(state1);
-          for (auto i : state1) {cout << i << ", ";}
-          cout << endl;
-
-          /* --------------------------------------------------------------- */
-          /* Update other car states */
-          /* --------------------------------------------------------------- */
-
-
-        	auto sensor_fusion = j[1]["sensor_fusion"];
-
-          // // iterate over each car and update the map of all cars
-          // for (auto& car : sensor_fusion) {
-          //   vector<double> car_state ({t0, car[1], car[2], car[3], car[4]});
-          //   if (cars.count(car[0]) == 0)
-          //     cars[car[0]] = Vehicle(road,car[0],car_state); // create the car
-          //   else
-          //     cars[car[0]].pushState(car_state); // the car already has been added
-          // }
-
-          /* --------------------------------------------------------------- */
-          /* Get start point and end point for trajectory generation */
-          /* --------------------------------------------------------------- */
-
-
-        	// Previous path data given to the Planner
-        	vector<double> previous_path_x = j[1]["previous_path_x"];
+          double car_x = j[1]["x"];
+          double car_y = j[1]["y"];
+          double car_s = j[1]["s"];
+          double car_d = j[1]["d"];
+          vector<double> previous_path_x = j[1]["previous_path_x"];
         	vector<double> previous_path_y = j[1]["previous_path_y"];
-        	double end_path_s = j[1]["end_path_s"];
-        	double end_path_d = j[1]["end_path_d"];
+          auto sensor_fusion = j[1]["sensor_fusion"];
+          double t_end = previous_path_x.size() * TIME_STEP;
+          double t = stop_timer(start_time);
 
-          Vehicle ego2 = ego;
+          // cout << "Current time remaining: " << t_end << endl;
+          cout << "   s = " << car_s << endl;
+          // cout << "   d = " << car_d << endl;
+          // cout << "   x = " << car_x << endl;
+          // cout << "   y = " << car_y << endl;
+          // cout << endl;
 
-          // if (previous_path_x.size() == 0) {
-          //   // end_path_s = ego.state[1];
-          //   // end_path_d = ego.state[2];
+          // vector<double> next_x_vals;
+          // vector<double> next_y_vals;
           //
-          //   // start_state = current_state
-          // } else {
-          //   // start_state = end_state
-          //   ego2.set_state(end_state);
+          // for (int i=0; i<previous_path_x.size(); ++i) {
+          //   next_x_vals.push_back(previous_path_x[i]);
+          //   next_y_vals.push_back(previous_path_y[i]);
           // }
 
-          // Update ego's neighborhood
-          ego.update_neighborhood(cars);
+          // Update all cars
+          for (auto& car : sensor_fusion) {
+            // Create the car if not seed before.
+            int id = car[0];
+            if (cars.count(id) == 0) cars[id] = Vehicle(id); // create the car
 
-          vector<Vehicle> neighborhood;
-          for (auto i : ego.neighborhood) {
-            neighborhood.push_back(cars[i]);
+            // Add the cars measurment - in frenet
+            Matrix2d M = road.TransformMat_C2F(car[5]);
+            Vector2d v = M * (Vector2d() << car[3], car[4]).finished();
+            cars[car[0]].new_measurment({car[5],car[6],v(0),v(1)}, t); // the car already has been added
           }
 
-          // generate fictional target vehicle
-          // Vehicle target = ego2;
-          // auto target_state = target.state;
-          // target_state[2] = 6;
-          // target_state[3] = 5;
-          // target_state[4] = 0;
-          // target_state[5] = 0;
-          // target_state[6] = 0;
-          // target_state[1] = target_state[1] + target_state[3]*10;
-          // target.set_state(target_state);
+          if (t_end < REPLANNING_TIME) {
 
-          // cout << "here0" << endl;
+            // Get ego's last known trajectory (if any)
+            if (t_end == 0) {
+              // Initialize ego's location if first call
+            	double car_yaw = j[1]["yaw"];
+            	double car_speed = j[1]["speed"];
 
-          cout << "current_sd :";
-          for (auto i : ego2.state) cout << " " << i;
-          cout << endl;
-          cout << "goal_sd :";
-          for (auto i : target2.state) cout << " " << i;
-          cout << endl;
+              // Get the transformation matrices between frenet and cartesian
+              Matrix2d M = road.TransformMat_C2F(car_s);
 
-          cout << "current_xy :";
-          for (auto i : ego2.state_xy) cout << " " << i;
-          cout << endl;
-          cout << "goal_xy :";
-          for (auto i : target2.state_xy) cout << " " << i;
-          cout << endl;
+              // Get the velocity vector in cartesian
+              car_yaw = deg2rad(car_yaw);
+              Vector2d v_xy = (Vector2d()<< cos(car_yaw), sin(car_yaw)).finished() * car_speed * 0.44704; // [m/s]
+              Vector2d v_sd = M * v_xy; // Convert to Frenet
 
-          // auto trajectories = ptg.generate(ego, target, 2.0, neighborhood);
-          Trajectory traj;
-          if (first_call) {
-            traj = ptg.generate(ego2, target2, 2, neighborhood);
-            first_call = false;
-          } else {
-            traj = ptg.generate(ego2, target2, 2, neighborhood);
-          }
+              /* Get ego's trajecotry. Note, in this case the state (position,
+              speed, acceleration), are the coefficients of the trajectory,
+              since the acceleration is assumed 0. */
+              Vector3d s_state = (Vector3d()<< car_s, v_sd(0), 0).finished();
+              Vector3d d_state = (Vector3d()<< car_d, v_sd(1), 0).finished();
+              ego.set_trajectory({Trajectory(s_state), Trajectory(d_state)});
 
-
-          auto trajT = traj.evaluate_state(0);
-          cout << "trajectory start xy :";
-          for (auto i : trajT) cout << " " << i;
-          cout << endl;
-
-          trajT = traj.evaluate_state(traj.T);
-          cout << "trajectory end xy :";
-          for (auto i : trajT) cout << " " << i;
-          cout << endl << endl;
-
-
-
-          // cout << "here1" << endl;
-          // auto traj = trajectories.back();
-
-          // // if (previous_path_x.size() > 1)
-          // //   ego.state[1] = end_path_s;
-          // ego.state[2] = 6;
-          // ego.state[3] = 20;
-          // ego.state[4] = 0;
-          // ego.state[5] = 0;
-          // ego.state[6] = 0;
-          // ego.state_xy = road.Frenet_to_Cartesian(ego.state);
-          // ego.predict_trajectory();
-
-
-
-
-          // cout << "x traj :" << endl;
-          // for (auto& i: ego.traj.x_coeffs) cout << i << ", ";
-          // cout << endl;
-          // cout << "y traj :" << endl;
-          // for (auto& i: ego.traj.y_coeffs) cout << i << ", ";
-          // cout << endl;
-          // cout << "T : " << ego.traj.T << endl;
-
-          // cout << "here2" << endl;
-
-          plotter.update(ego,cars,road); // update plot
-
-        	json msgJson;
-
-          vector<double> next_x_vals;
-          vector<double> next_y_vals;
-
-          // if (previous_path_x.size() > 1) {
-          //   for (int i = 0; i<previous_path_x.size(); ++i) {
-          //     next_x_vals.push_back(previous_path_x[i]);
-          //     next_y_vals.push_back(previous_path_y[i]);
-          //   }
-          // }
-
-          auto traj_state = traj.generate_state(0.02);
-          // cout << traj_state.size() << endl;
-          for (auto& s_i : traj_state) {
-            auto s_ic = road.Frenet_to_Cartesian(s_i);
-            next_x_vals.push_back(s_ic[1]);
-            next_y_vals.push_back(s_ic[2]);
-            // cout << s_i[1] << ", " << s_i[2] <<", "<< s_ic[1] << ", " << s_ic[2] << endl;
-            if (next_x_vals.size() >= 100) {
-              end_state = s_i;
-              break;
+              // cout << "Initializing ego ..." << endl;
+              // ego.display();
+              // cout << endl;
+            } else {
+              ego.set_trajectory(end_traj);
+              // cout << "Using last known ego location ..." << endl;
+              // ego.display();
+              // cout << endl;
             }
+            ego.t0 = 0;
+
+
+
+            vector<double> ego_sd0 = {car_s, car_d};
+            vector<double> ego_sd1 = ego.location(0);
+            vector<double> ego_sd2 = ego.location(PLAN_HORIZON);
+
+            /* Predict car locations at t_end and at t_end + PLAN_HORIZON. Any
+            car within CONSIDER_DISTANCE any any of the three times will be
+            used when generating trajectories for collision avoidance. */
+            vector<Vehicle> near_cars;
+            for (auto& v : cars) {
+              vector<double> sd0 = v.second.location(0);
+              vector<double> sd1 = v.second.location(t_end);
+              vector<double> sd2 = v.second.location(t_end + PLAN_HORIZON);
+
+              if (fabs(sd0[0] - ego_sd0[0]) < CONSIDER_DISTANCE ||
+                  fabs(sd1[0] - ego_sd1[0]) < CONSIDER_DISTANCE ||
+                  fabs(sd2[0] - ego_sd2[0]) < CONSIDER_DISTANCE) {
+
+                // Move the car forward in time to t_end, and add it to our
+                // near cars.
+                Vehicle car = v.second;
+                car.set_state(car.state_at(t_end));
+                car.t0 = 0;
+                near_cars.push_back(car);
+              }
+            }
+
+            /* Predict a new trajectory for ego.
+            At this time, just use reactive-trajectory generation and skip
+            the behavioral planning parts. This will likely lead to recless
+            driving, but it should hopefully pass the project. */
+            bool success = JMTG::reactive(ego, near_cars);
+            cout << "Successful trajectory generation? " << success << endl;
+
+            // ego.display();
+
+
+            // compute new location points to give to simulator
+            for (double ti = 0; ti <= PLAN_HORIZON; ti += TIME_STEP) {
+
+              // car location in frenet at t = ti;
+              vector<double> loc_sd = ego.location(ti);
+
+              // car location in cartesian
+              auto xy = road.getXY(fmod(loc_sd[0], RoadLength), loc_sd[1]);
+              previous_path_x.push_back(xy[0]);
+              previous_path_y.push_back(xy[1]);
+              // cout << xy[0] << "\t" << xy[1] << endl;
+            }
+
+            end_traj = ego.trajectory_at(PLAN_HORIZON);
           }
 
-          // cout << "end state :";
-          // for (auto i : end_state) cout << " " << i;
-          // cout << endl;
 
-          // cout << endl;
-          // cout << previous_path_x.size() << endl;
 
-        	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
-        	msgJson["next_x"] = next_x_vals;
-        	msgJson["next_y"] = next_y_vals;
+          // next_x_vals.clear();
+          // next_y_vals.clear();
+          // for (int i = 0; i< 50; ++i) {
+          //   auto xy = road.getXY(car_s+i, 6);
+          //   next_x_vals.push_back(xy[0]);
+          //   next_y_vals.push_back(xy[1]);
+          // }
+
+          // for (int i=0; i<next_x_vals.size(); ++i) {
+          //   cout << next_x_vals[i] << "\t" << next_y_vals[i] << endl;
+          // }
+
+          // assert(2==0);
+
+          /* Create commands to send to simulator */
+          json msgJson;
+        	msgJson["next_x"] = previous_path_x;
+        	msgJson["next_y"] = previous_path_y;
 
         	auto msg = "42[\"control\","+ msgJson.dump()+"]";
 

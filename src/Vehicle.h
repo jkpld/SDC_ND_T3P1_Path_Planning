@@ -13,14 +13,20 @@
 #include "helpers.h"
 
 
-using namespace std;
+
 using namespace Eigen;
+// using namespace std;
+
+using std::vector;
+using std::cout;
+using std::endl;
 
 class Vehicle {
 private:
   int ID;
   double Length;
   double Width;
+  double t0_;
 
 public:
   State state;
@@ -31,7 +37,7 @@ public:
   Vehicle() : Vehicle(0, 4.8, 1.8) {};
   Vehicle(int id) : Vehicle(id, 4.8, 1.8) {};
   Vehicle(double L, double W) : Vehicle(0, L, W) {};
-  Vehicle(int id, double L, double W) : ID(id), Length(L), Width(W), t0(0), state(State()), trajectory(state.get_trajectory()) {};
+  Vehicle(int id, double L, double W) : ID(id), Length(L), Width(W), t0(0), state(State()), trajectory(state.get_trajectory()), t0_(-1) {};
 
   void display() const {
     cout << "Vehicle (ID : " << ID << ")" << endl;
@@ -67,12 +73,12 @@ public:
     return (Vector2d()<<Length,Width).finished();
   }
 
-  /* Add new measurment of state, should be kalman filter, but simply estimates
-    acceleration given the current and the last measurement (if not too
-    outdated)
+  /* Add new measurment of state. Should be kalman filter or something, but
+    simply estimates acceleration given the current and the last measurement
+    (if not too outdated)
     measured state contains {x,y,vx,vy} - in Frenet coordinates! */
   void new_measurment(vector<double> m, double t1) {
-    double dt = (t1 - t0);
+    double dt = (t1 - t0_);
     Vector3d x, y;
 
     if (dt > 0.5) {
@@ -81,12 +87,13 @@ public:
       y << m[1], m[3], 0;
     } else {
       // update state_xy acceleration
-      x << m[0], m[2], (state.x(1)-m[2])/dt;
-      y << m[1], m[3], (state.x(2)-m[3])/dt;
+      x << m[0], m[2], (m[2] - state.x(1))/dt;
+      y << m[1], m[3], (m[3] - state.y(1))/dt;
     }
 
     set_state(State(x,y)); // Set the state
     t0 = 0; // Update the time.
+    t0_ = t1;
   }
 
   // Return the cars bounding box at time t.
@@ -121,7 +128,7 @@ public:
     with the proper orientation equations, as given in the paper "Optimal
     Trajectory Generation for Dynamic Street Senarios in the Frenet Frame" */
     t = t - t0;
-    double T = max(trajectory[0].knot, trajectory[1].knot);
+    double T = std::max(trajectory[0].knot, trajectory[1].knot);
     t = (t>=T-0.01) ? T-0.01 : t;
 
     Vector3d sx = trajectory[0].state_at(t);
@@ -133,20 +140,24 @@ public:
     return State(trajectory[0].state_at(t-t0), trajectory[1].state_at(t-t0));
   }
 
+  vector<Trajectory> trajectory_at(double t) const {
+    return {trajectory[0].trajectory_at(t-t0), trajectory[1].trajectory_at(t-t0)};
+  }
+
   vector<double> location(double t) const {
     return {trajectory[0].ppval(t-t0), trajectory[1].ppval(t-t0)};
   }
 
   // Get the location at many times. The type could be VectorXd or a
   // vector<double>, for example.
-  template <typename T>
-  vector<vector<double>> location(T t) const {
-    vector<vector<double>> loc;
-    for (int i = 0; i<t.size(); ++i) {
-      loc.push_back(location(t(i)));
-    }
-    return loc;
-  }
+  // template <typename T>
+  // vector<vector<double>> location(T t) const {
+  //   vector<vector<double>> loc;
+  //   for (int i = 0; i<t.size(); ++i) {
+  //     loc.push_back(location(t(i)));
+  //   }
+  //   return loc;
+  // }
 
   template <typename T>
   MatrixXd location_Eig(T t) const {

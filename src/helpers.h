@@ -1,10 +1,11 @@
 #ifndef HELPERS_H
 #define HELPERS_H
 
-#include "Eigen-3.3/Eigen/Core"
-#include "polynomial.h"
 #include <iostream>
 #include <algorithm>
+#include "Eigen-3.3/Eigen/Core"
+#include "polynomial.h"
+
 
 /* Contents
 
@@ -35,7 +36,10 @@ class Rectangle - Class for a rotated rectangle with a method overlap() that
 
 
 using namespace Eigen;
-using namespace std;
+// using namespace std;
+using std::vector;
+using std::cout;
+using std::endl;
 
 class Trajectory : public PP{
 public:
@@ -54,6 +58,25 @@ public:
     else state = s.head(3);
 
     return state;
+  }
+
+  Trajectory trajectory_at(double t) const {
+    // Get the derivatives of the polynomial at t.
+    VectorXd coef_d = ppeval(t);
+
+    // Convert the derivatives to the coefficients by integrating - dividing by
+    // (1:N)!. See note in polynomial/polyeval().
+    int N = coef_d.size();
+    VectorXd fac = VectorXd::LinSpaced(N,0,N-1);
+    fac(0) = 1;
+    for (int i=1; i<N; ++i) fac(i) *= fac(i-1);
+    VectorXd coef_n = coef_d.cwiseQuotient(fac);
+
+    if (coef.size() == 1 || t>=knot) {
+      return Trajectory(coef_n);
+    } else {
+      return Trajectory(coef_n, coef[1], knot-t);
+    }
   }
 };
 
@@ -119,7 +142,7 @@ vector<size_t> sort_outer_sum(const vector<double> &v, const vector<double> &v2)
   iota(idx.begin(), idx.end(), 0);
 
   // sort linear indexes based on comparing values the matrix v[i] + v[j]
-  sort(idx.begin(), idx.end(),
+  std::sort(idx.begin(), idx.end(),
        [&v,&v2,&N](size_t i1, size_t i2) {
          int m1,n1,m2,n2;
          ind2sub(N,i1,m1,n1);

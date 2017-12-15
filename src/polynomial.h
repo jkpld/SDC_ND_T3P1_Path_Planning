@@ -9,11 +9,12 @@ a = (a0, a1, a2, a3, ..., an)
 A(x) = a(i)*x^i
 */
 
-#include "Eigen-3.3/Eigen/Eigenvalues"
-#include "Eigen-3.3/Eigen/Core"
 #include <math.h>
 #include <vector>
 #include <iostream>
+
+#include "Eigen-3.3/Eigen/Eigenvalues"
+#include "Eigen-3.3/Eigen/Core"
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
@@ -151,8 +152,8 @@ like Matlab.
 */
 VectorXd realRoots(VectorXd const & coefs) {
   bool DEBUG = false;
-  if (DEBUG) cout << "---------------- realRoots() --------------------" << endl;
-  if (DEBUG) cout << "   Coefs : " << coefs.transpose() << endl;
+  if (DEBUG) std::cout << "---------------- realRoots() --------------------" << std::endl;
+  if (DEBUG) std::cout << "   Coefs : " << coefs.transpose() << std::endl;
   int N = coefs.size();
 
   double tol = 1e-10;
@@ -189,11 +190,11 @@ VectorXd realRoots(VectorXd const & coefs) {
   // 0. Ex. coef = (0,0,3,0) => A(x) = 3x^2;
   if (a.size()<2) return VectorXd::Zero(1);
 
-  if (DEBUG) cout << "   Coef after removing trailing/leading zeros : " << endl;
+  if (DEBUG) std::cout << "   Coef after removing trailing/leading zeros : " << std::endl;
   if (DEBUG) {
-    cout << "      ";
-    for (int i=0; i<a.size(); ++i) cout << a[i] << " ";
-    cout << endl;
+    std::cout << "      ";
+    for (int i=0; i<a.size(); ++i) std::cout << a[i] << " ";
+    std::cout << std::endl;
   }
   // Form the companion matrix
   N = a.size() - 1;
@@ -205,8 +206,8 @@ VectorXd realRoots(VectorXd const & coefs) {
     C(i, N-1) = -a[i]/a.back();
   }
 
-  if (DEBUG) cout << "   Companion matrix : " << endl;
-  if (DEBUG) cout << C << endl;
+  if (DEBUG) std::cout << "   Companion matrix : " << std::endl;
+  if (DEBUG) std::cout << C << std::endl;
 
   // Compute the eigenvalues, which are the polynomial roots.
   VectorXcd V = C.eigenvalues();
