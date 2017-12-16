@@ -41,12 +41,12 @@ using std::vector;
 using std::cout;
 using std::endl;
 
-class Trajectory : public PP{
+class Trajectory : public PP2{
 public:
 
-  Trajectory() : PP() {};
-  Trajectory(VectorXd coef1) : PP(coef1) {};
-  Trajectory(VectorXd coef1, VectorXd coef2, double k) : PP(coef1, coef2, k) {};
+  Trajectory() : PP2() {};
+  Trajectory(VectorXd coef1) : PP2(coef1) {};
+  Trajectory(VectorXd coef1, VectorXd coef2, double k) : PP2(coef1, coef2, k) {};
 
   Vector3d state_at(double t) const {
     VectorXd s = ppeval(t);

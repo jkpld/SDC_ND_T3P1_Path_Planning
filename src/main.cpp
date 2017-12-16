@@ -24,9 +24,9 @@ using namespace std;
 using json = nlohmann::json;
 
 double TIME_STEP = 0.02;
-double REPLANNING_TIME = 0.6;
+double REPLANNING_TIME = 0.3;
 double PLAN_HORIZON = 1;
-double CONSIDER_DISTANCE = 50;
+double CONSIDER_DISTANCE = 150;
 
 // For converting back and forth between radians and degrees.
 constexpr double pi() { return M_PI; }
@@ -48,6 +48,13 @@ string hasData(string s) {
   return "";
 }
 
+template <typename T>
+T dist2(T x1, T y1, T x2, T y2){
+  T dx = x1-x2;
+  T dy = y1-y2;
+  return dx*dx + dy*dy;
+};
+
 // Functions for timing
 chrono::high_resolution_clock::time_point start_timer() {
     return chrono::high_resolution_clock::now();
@@ -62,6 +69,10 @@ int main() {
 
   // Initialize road
   RoadMap road("../data/highway_map.csv");
+
+  // Update JMTG lonDistCorrection function to be the same as our road's (which,
+  // makes the road periodic.).
+  JMTG::lonDistCorrection = road.lonDistCorrection;
 
   map<int, Vehicle> cars;
   Vehicle ego(0);
@@ -91,23 +102,12 @@ int main() {
           vector<double> previous_path_x = j[1]["previous_path_x"];
         	vector<double> previous_path_y = j[1]["previous_path_y"];
           auto sensor_fusion = j[1]["sensor_fusion"];
-          double t_end = previous_path_x.size() * TIME_STEP;
+
+          int N = previous_path_x.size();
+          double t_end = N * TIME_STEP;
           double t = stop_timer(start_time);
 
-          // cout << "Current time remaining: " << t_end << endl;
           cout << "   s = " << car_s << endl;
-          // cout << "   d = " << car_d << endl;
-          // cout << "   x = " << car_x << endl;
-          // cout << "   y = " << car_y << endl;
-          // cout << endl;
-
-          // vector<double> next_x_vals;
-          // vector<double> next_y_vals;
-          //
-          // for (int i=0; i<previous_path_x.size(); ++i) {
-          //   next_x_vals.push_back(previous_path_x[i]);
-          //   next_y_vals.push_back(previous_path_y[i]);
-          // }
 
           // Update all cars
           for (auto& car : sensor_fusion) {
@@ -115,13 +115,18 @@ int main() {
             int id = car[0];
             if (cars.count(id) == 0) cars[id] = Vehicle(id); // create the car
 
+
             // Add the cars measurment - in frenet
+            // NOTE: velocity transofrm is missing factor with curvature.
             Matrix2d M = road.TransformMat_C2F(car[5]);
             Vector2d v = M * (Vector2d() << car[3], car[4]).finished();
             cars[car[0]].new_measurment({car[5],car[6],v(0),v(1)}, t); // the car already has been added
           }
 
-          if (t_end < REPLANNING_TIME) {
+          vector<double> path_x;
+          vector<double> path_y;
+
+          if (t_end < PLAN_HORIZON) {
 
             // Get ego's last known trajectory (if any)
             if (t_end == 0) {
@@ -133,6 +138,7 @@ int main() {
               Matrix2d M = road.TransformMat_C2F(car_s);
 
               // Get the velocity vector in cartesian
+              // NOTE: velocity transofrm is missing factor with curvature.
               car_yaw = deg2rad(car_yaw);
               Vector2d v_xy = (Vector2d()<< cos(car_yaw), sin(car_yaw)).finished() * car_speed * 0.44704; // [m/s]
               Vector2d v_sd = M * v_xy; // Convert to Frenet
@@ -155,29 +161,26 @@ int main() {
             }
             ego.t0 = 0;
 
+            ArrayXXd ego_loc(3,2);
+            ego_loc.row(0) << car_s, car_d;
+            ego_loc.block<2,2>(1,0) = ego.location_Eig((Vector2d()<<0, PLAN_HORIZON).finished());
 
-
-            vector<double> ego_sd0 = {car_s, car_d};
-            vector<double> ego_sd1 = ego.location(0);
-            vector<double> ego_sd2 = ego.location(PLAN_HORIZON);
-
-            /* Predict car locations at t_end and at t_end + PLAN_HORIZON. Any
-            car within CONSIDER_DISTANCE any any of the three times will be
-            used when generating trajectories for collision avoidance. */
+            /* Predict car locations now, at REPLANNING_TIME and at
+            REPLANNING_TIME + PLAN_HORIZON. Any car within CONSIDER_DISTANCE of
+            ego at any of the three times will be used when generating
+            trajectories for collision avoidance. */
             vector<Vehicle> near_cars;
             for (auto& v : cars) {
-              vector<double> sd0 = v.second.location(0);
-              vector<double> sd1 = v.second.location(t_end);
-              vector<double> sd2 = v.second.location(t_end + PLAN_HORIZON);
+              ArrayXXd car_loc = v.second.location_Eig((Vector3d()<<0, REPLANNING_TIME, REPLANNING_TIME + PLAN_HORIZON).finished());
 
-              if (fabs(sd0[0] - ego_sd0[0]) < CONSIDER_DISTANCE ||
-                  fabs(sd1[0] - ego_sd1[0]) < CONSIDER_DISTANCE ||
-                  fabs(sd2[0] - ego_sd2[0]) < CONSIDER_DISTANCE) {
+              ArrayXd dist_s = car_loc.col(0) - ego_loc.col(0);
+              dist_s = dist_s.unaryExpr(road.lonDistCorrection);
 
-                // Move the car forward in time to t_end, and add it to our
+              if ((dist_s.abs() < CONSIDER_DISTANCE).any()) {
+                // Move the car forward in time to REPLANNING_TIME, and add it to our
                 // near cars.
                 Vehicle car = v.second;
-                car.set_state(car.state_at(t_end));
+                car.set_state(car.state_at(REPLANNING_TIME));
                 car.t0 = 0;
                 near_cars.push_back(car);
               }
@@ -187,26 +190,69 @@ int main() {
             At this time, just use reactive-trajectory generation and skip
             the behavioral planning parts. This will likely lead to recless
             driving, but it should hopefully pass the project. */
-            bool success = JMTG::reactive(ego, near_cars);
+            bool success = JMTG::reactive(ego, near_cars, road);
             cout << "Successful trajectory generation? " << success << endl;
 
             // ego.display();
 
+            // car location in frenet at t = 0 (which is t=t_end);
+            vector<double> loc_sd = ego.location(0);
+            auto xy = road.getXY(loc_sd[0], loc_sd[1]);
 
-            // compute new location points to give to simulator
+            // Our new path and our old path should cover approximately the same
+            // REPLANNING_TIME of distance. So, we need to find our where the
+            // old path and the new path connect, and then replance the old path
+            // with the new path.
+            // -- find out which element in old-path is closest to the first
+            // -- element of the new path
+            // cout << "searching for overlap location" << endl;
+
+            size_t idx0 = 0;
+            if (N > 0) {
+              vector<size_t> idx(N);
+              iota(idx.begin(), idx.end(), 0);
+
+              std::sort(idx.begin(), idx.end(), [&](size_t i1, size_t i2){
+                return dist2(previous_path_x[i1], previous_path_y[i1], xy[0], xy[1]) <
+                  dist2(previous_path_x[i2], previous_path_y[i2], xy[0], xy[1]);
+              });
+
+              // if (dist2(previous_path_x[idx[0]],previous_path_y[idx[0]],xy[0],xy[1]) > 1)
+                // assert(1==2);
+
+              idx0 = idx[0];
+            }
+
+            // cout << "constructing path" << endl;
+            // Construct the new path points.
+            // - first get all previous points for idx < idx[0]
+
+
+            for (size_t i=0; i<idx0; ++i) {
+              path_x.push_back(previous_path_x[i]);
+              path_y.push_back(previous_path_y[i]);
+            }
+
+            // - now add on the newly computed path.
             for (double ti = 0; ti <= PLAN_HORIZON; ti += TIME_STEP) {
 
               // car location in frenet at t = ti;
               vector<double> loc_sd = ego.location(ti);
 
               // car location in cartesian
-              auto xy = road.getXY(fmod(loc_sd[0], RoadLength), loc_sd[1]);
-              previous_path_x.push_back(xy[0]);
-              previous_path_y.push_back(xy[1]);
+              auto xy = road.getXY(loc_sd[0], loc_sd[1]);
+              path_x.push_back(xy[0]);
+              path_y.push_back(xy[1]);
               // cout << xy[0] << "\t" << xy[1] << endl;
             }
 
-            end_traj = ego.trajectory_at(PLAN_HORIZON);
+            end_traj = ego.trajectory_at(REPLANNING_TIME);
+            if (end_traj[0].coef[0](0) > road.RoadLength) {
+              end_traj[0].coef[0](0) -= road.RoadLength;
+            }
+          } else {
+            path_x = previous_path_x;
+            path_y = previous_path_y;
           }
 
 
@@ -227,8 +273,8 @@ int main() {
 
           /* Create commands to send to simulator */
           json msgJson;
-        	msgJson["next_x"] = previous_path_x;
-        	msgJson["next_y"] = previous_path_y;
+        	msgJson["next_x"] = path_x;
+        	msgJson["next_y"] = path_y;
 
         	auto msg = "42[\"control\","+ msgJson.dump()+"]";
 

@@ -148,6 +148,10 @@ public:
     return {trajectory[0].ppval(t-t0), trajectory[1].ppval(t-t0)};
   }
 
+  // Vector2d location_Eig(double t) const {
+  //   return (Vector2d() << trajectory[0].ppval(t-t0), trajectory[1].ppval(t-t0)).finished();
+  // }
+
   // Get the location at many times. The type could be VectorXd or a
   // vector<double>, for example.
   // template <typename T>
@@ -160,7 +164,7 @@ public:
   // }
 
   template <typename T>
-  MatrixXd location_Eig(T t) const {
+  MatrixXd location_Eig(T const& t) const {
     MatrixXd loc(t.size(),2);
     for (int i = 0; i<t.size(); ++i) {
       auto loc_i = location(t(i));

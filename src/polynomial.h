@@ -12,6 +12,7 @@ A(x) = a(i)*x^i
 #include <math.h>
 #include <vector>
 #include <iostream>
+#include <cassert>
 
 #include "Eigen-3.3/Eigen/Eigenvalues"
 #include "Eigen-3.3/Eigen/Core"
@@ -234,15 +235,15 @@ VectorXd realRoots(VectorXd const & coefs) {
   return r;
 }
 
-/* PP : Very simple piece-wise polynomial class for only 2 pieces. */
-class PP {
+/* PP2 : Very simple piece-wise polynomial class for only 2 pieces. */
+class PP2 {
 public:
   vector<VectorXd> coef;
   double knot;
 
-  PP() : coef({VectorXd::Zero(3)}), knot(1e300) {}
-  PP(VectorXd coef1) : coef({coef1}), knot(1e300) {}
-  PP(VectorXd coef1, VectorXd coef2, double k) : coef({coef1, coef2}), knot(k) {}
+  PP2() : coef({VectorXd::Zero(3)}), knot(1e300) {}
+  PP2(VectorXd coef1) : coef({coef1}), knot(1e300) {}
+  PP2(VectorXd coef1, VectorXd coef2, double k) : coef({coef1, coef2}), knot(k) {}
 
   double ppval(double xi) const {
     if (coef.size() == 1) {
@@ -278,6 +279,73 @@ public:
       std::cout << "  knot = " << knot << std::endl;
     }
   }
+};
+
+
+/* PP : Piece-wise polynomial class any number of peices */
+class PP {
+private:
+  template <typename T>
+  T pp_eval_at(typename std::function<T(VectorXd,double)> f, double& x_i) const {
+
+    auto it = std::lower_bound(knot.begin(),knot.end(),x_i);
+    int ii = std::max( int(it-knot.begin())-1, 0);
+    double dx = x_i - knot[ii];
+
+    return f(coef[ii], dx);
+  }
+
+public:
+  vector<VectorXd> coef;
+  vector<double> knot;
+
+  PP() : coef({VectorXd::Zero(3)}), knot({1e300,1e300}) {};
+  PP(vector<VectorXd> coefs, vector<double> knots) : coef(coefs), knot(knots) {};
+
+  VectorXd ppeval(double& x_i) const {
+    return pp_eval_at<VectorXd>(polyeval, x_i);
+  }
+  double ppval(double& x_i) const {
+    return pp_eval_at<double>(polyval, x_i);
+  }
+
+  PP ppder() const {
+    vector<VectorXd> coef_n(coef.size());
+    for (int i=0; i<coef.size(); ++i) {
+      coef_n[i] = polyder(coef[i]);
+    }
+    // std::transform(coef.begin(), coef.end(), coef_n.begin(), polyder);
+    return PP(coef_n, knot);
+  }
+
+  PP ppint(VectorXd *C = 0) const {
+    VectorXd K;
+    if (C) {
+      K = *C;
+      assert(coef.size() == K.size());
+    } else {
+      K = VectorXd::Zero(coef.size());
+    }
+
+    vector<VectorXd> coef_n(coef.size());
+    for (int i=0; i<coef.size(); ++i) {
+      coef_n[i] = polyint(coef[i], K(0));
+    }
+    // std::transform(coef.begin(), coef.end(), coef_n.begin(), K.data(), polyint);
+    return PP(coef_n, knot);
+  }
+
+  PP ppmult(PP& pp2) const {
+    // The two polynomials should have the same knots! This could be changed
+    // with fancier programming and more time.
+    assert(knot.size() == pp2.knot.size());
+    for (int i = 0; i<knot.size(); ++i) assert(knot[i]==pp2.knot[i]);
+
+    vector<VectorXd> coef_n(coef.size());
+    std::transform(coef.begin(), coef.end(), coef_n.begin(), pp2.coef.begin(), polymult);
+    return PP(coef_n, knot);
+  }
+
 };
 
 #endif

@@ -12,12 +12,13 @@ sited as [1].)
 #include <vector>
 #include <math.h>
 #include <algorithm>
+#include <functional>
 
 #include "Eigen-3.3/Eigen/Core"
 #include "helpers.h"
 #include "polynomial.h"
 #include "Vehicle.h"
-
+#include "RoadMap.h"
 
 using namespace Eigen;
 // using namespace std;
@@ -41,14 +42,14 @@ namespace JMTG {
   double kt = 10; // weight fot the time-to-complete cost
   double ks = 100; // weight for the difference in s-coordinate cost
   double ksd = 40; // weight for the difference in s-dot-coordinate cost
-  double kd = 200; // weight for the difference in d-coordinate cost
+  double kd = 2000; // weight for the difference in d-coordinate cost
 
-  double k_lat = 1; // weight for lateral trajectories
+  double k_lat = 10; // weight for lateral trajectories
   double k_lon = 1; // weight for longitudinal trajectories
 
   /* Safty_margin - This will be used to ensure the cars do not collide
   or come to close to each other. */
-  Vector2d Safty_Margin = (Vector2d()<<0.5,0.5).finished();
+  Vector2d Safty_Margin = (Vector2d()<<1,0.5).finished();
 
   /* Parameters for constant distance and constant time law. */
   double D0 = 1; // static distance required between cars at speed 0
@@ -69,14 +70,24 @@ namespace JMTG {
   double Lane_Width = 4;
 
   /* Time horizons */
-  double Time_Horizon = 3; // used in checking for collisions
+  double Time_Horizon = 4; // used in checking for collisions
   double Reactive_Layer_Time_Horizon = 3;
 
   /* Properties controling the search values for the new trajectories */
-  ArrayXd T_ = ArrayXd::LinSpaced(6,0.5,3); // times used in searching for new trajectories
+  ArrayXd T_ = ArrayXd::LinSpaced(4,1,4); // times used in searching for new trajectories
   ArrayXd ds_ = ArrayXd::LinSpaced(11,-5,5); // offset longitudinal distances
   ArrayXd dsd_ = ArrayXd::LinSpaced(5,-2,2); // offset speeds
   ArrayXd d_ = ArrayXd::LinSpaced(3,-1,1); // offset lateral distances
+
+  /* Function for correcting the lognitudinal distance between to s-coordinates
+  Ex. Car 1 has s = s1 and car 2 has s = s2. There difference is s1-s2. Pass
+  that differenc to this function apply a custom correction. (For example, if
+  the road is periodic, then we want to make sure we are correctly computing
+  this difference.)
+  The default function is to apply no correction.
+   */
+  std::function<double(double)> lonDistCorrection = [](double ds) -> double {return ds;};
+
 
   namespace INTERNAL {
     VectorXd JMT(Vector3d s0, Vector3d s1, double T) {
@@ -140,7 +151,7 @@ namespace JMTG {
       // acceleration, and jerk are all below the maximum allowed values.
       if (DEBUG <= 1) cout << "--------------- compute_validity ----------------" << endl;
       ArrayXf max_vals(3);
-      max_vals << Max_Speed, Max_Accel, Max_Jerk;
+      max_vals << Max_Speed*1.1, Max_Accel, Max_Jerk;
       if (DEBUG <= 1) cout << "   Coefs : " << coefs.transpose() << endl;
 
       double tol = 1e-10;
@@ -337,7 +348,7 @@ namespace JMTG {
 
       for (int si =0 ; si<search_sd.size(); ++si) {
         // Do not search for any trajectory that takes us off the road.
-        if (abs(s_dot(si))>Max_Speed) continue;
+        if (s_dot(si)>Max_Speed || s_dot(si) <= 0) continue;
 
         for (int ti = 0; ti<T_.size(); ++ti) {
           Vector3d s1;
@@ -354,7 +365,7 @@ namespace JMTG {
 
     };
 
-    bool detect_collision(Vehicle& ego, vector<Vehicle> const& cars, MatrixXd car_traj, VectorXd t, VectorXd min_collision_free_dist){
+    bool detect_collision(Vehicle& ego, vector<Vehicle> const& cars, MatrixXd car_traj, VectorXd t, VectorXd min_collision_free_dist, RoadMap const& road){
 
       if (DEBUG <= 1) cout << "----------------- detect_collision -----------------" << endl;
       // NOTE: I am using just axis aligned bounding box instead of the exact
@@ -365,10 +376,38 @@ namespace JMTG {
       int Nc = cars.size();
       int Nt = t.size();
 
+      // Get ego location/speed, and the map curvature.
+      VectorXd ego_s(Nt), ego_d(Nt);
+      ArrayXd ego_vs(Nt), ego_vd(Nt), kappa(Nt);
+      for (int i=0; i<Nt; ++i) {
+        VectorXd s_dat = ego.trajectory[0].ppeval(t(i));
+        ego_s(i) = s_dat(0);
+        ego_vs(i) = s_dat(1);
+
+        VectorXd d_dat = ego.trajectory[1].ppeval(t(i));
+        ego_d(i) = d_dat(0);
+        ego_vd(i) = d_dat(1);
+
+        kappa(i) = road.curvature(s_dat(0));
+      }
+
+      if ( (((1 - kappa *ego_d.array())*ego_vs).square() + ego_vd.square() > 0.997*Max_Speed*Max_Speed).any()) {
+        if (DEBUG <= 2) cout << "  Adjust speed over limit!" << endl;
+        return true;
+      }
+
       MatrixXd ego_traj = ego.location_Eig(t);
       MatrixXd dist(Nt,Nc);
       for (int ci=0; ci<Nc; ++ci) {
-        dist.col(ci) = (car_traj.block(ci*Nt,0,Nt,2) - ego_traj).rowwise().squaredNorm() / min_collision_free_dist(ci);
+        // Lognitudinal distance using any correction.
+        ArrayXd dx = car_traj.block(ci*Nt,0,Nt,1) - ego_s;
+        dx = dx.unaryExpr(lonDistCorrection);
+
+        // Lateral distance.
+        ArrayXd dy = car_traj.block(ci*Nt,1,Nt,1) - ego_d;
+
+        // Normalized distance between cars.
+        dist.col(ci) = (dx*dx + dy*dy) / min_collision_free_dist(ci);
       }
 
       // Find all the points (car/time combinations) that we must check for a collision.
@@ -389,19 +428,25 @@ namespace JMTG {
         for (int ct_i=0; ct_i<idx.size(); ++ct_i) {
           int ti,ci;
           ind2sub(Nt,idx[ct_i],ti,ci);
-          Rectangle rec1 = ego.bounding_box(t(ti), ego_traj.row(ti), 2*Safty_Margin);
-          Rectangle rec2 = cars[ci].bounding_box(t(ti), car_traj.row(ci*Nt+ti), 2*Safty_Margin);
+          // Translate to have ego at 0,0
+          Vector2d d = car_traj.row(ci*Nt+ti) - ego_traj.row(ti);
+          // Correct longitudinal distance.
+          d(0) = lonDistCorrection(d(0));
+          // Create the two bounding boxes.
+          Rectangle rec1 = ego.bounding_box(t(ti), Vector2d::Zero(2), 2*Safty_Margin);
+          Rectangle rec2 = cars[ci].bounding_box(t(ti), d, 2*Safty_Margin);
+          // Check if they overlap
           if (rec1.overlap(rec2, OA_DETECTION)) {
             if (DEBUG <= 2) {
 
               cout << "        ___________________________" << endl;
               cout << "       | Collision detected" << endl;
               cout << "       |   ego bbox :" << endl;
-              cout << "       |      center = " << ego_traj.row(ti) << endl;
+              cout << "       |      center = " << Vector2d::Zero(2) << endl;
               cout << "       |      x_vert = " << rec1().row(0) << endl;
               cout << "       |      y_vert = " << rec1().row(1) << endl;
               cout << "       |   car bbox :" << endl;
-              cout << "       |      center = " << car_traj.row(ci*Nt+ti) << endl;
+              cout << "       |      center = " << d << endl;
               cout << "       |      x_vert = " << rec2().row(0) << endl;
               cout << "       |      y_vert = " << rec2().row(1) << endl;
               cout << "       |__________________________" << endl;
@@ -413,7 +458,7 @@ namespace JMTG {
       return false;
     };
 
-    bool generate_(Vehicle& ego, vector<Vehicle> const& cars, SearchMode const& SM, ArrayXd const& search_d, ArrayXd const& search_sd) {
+    bool generate_(Vehicle& ego, vector<Vehicle> const& cars, SearchMode const& SM, RoadMap const& road, ArrayXd const& search_d, ArrayXd const& search_sd) {
 
       vector<Trajectory> trajs_d, trajs_s;
       vector<double> costs_d, costs_s;
@@ -519,9 +564,7 @@ namespace JMTG {
         if (DEBUG <= 1) cout << "Collision detection times : "<< t.transpose() << endl;
         for (int ci=0; ci<Nc; ++ci) {
           // get the car locations
-
-          MatrixXd ego_loc = cars[ci].location_Eig(t);
-          car_traj.block(ci*Nt,0,Nt,2) << ego_loc;
+          car_traj.block(ci*Nt,0,Nt,2) << cars[ci].location_Eig(t);
 
           // half diagonal of the car
           min_collision_free_dist(ci) = (cars[ci].get_size()/2 + Safty_Margin).norm();
@@ -539,7 +582,7 @@ namespace JMTG {
           ego.set_trajectory({trajs_s[si], trajs_d[di]});
 
           // Detect collisions
-          collide = detect_collision(ego, cars, car_traj, t, min_collision_free_dist);
+          collide = detect_collision(ego, cars, car_traj, t, min_collision_free_dist, road);
           if (!collide) break;
         }
 
@@ -555,24 +598,26 @@ namespace JMTG {
     };
   };
 
-  bool reactive(Vehicle& ego, vector<Vehicle> const& cars) {
-    double v_ref = Max_Speed * 0.85;
+  bool reactive(Vehicle& ego, vector<Vehicle> const& cars, RoadMap const& road) {
+    double v_ref = Max_Speed * 0.97;
     ActiveMode aM(Mode::VELOCITY_KEEPING, v_ref);
     SearchMode sM(aM, 2);
 
-    ArrayXd d_search(9);// = ArrayXd::LinSpaced(7,-6,6);
-    ArrayXd sd_search = ArrayXd::LinSpaced(8,-14,0);
-    d_search << -5,-4,-3,-1,0,1,3,4,5;//
 
-    return INTERNAL::generate_(ego, cars, sM, d_search, sd_search);
+    ArrayXd sd_search(12); // = ArrayXd::LinSpaced(12,-20,2);
+    sd_search << -17.5, -15, -12.5, -10, -7.5, -6, -4.5, -3, -2, -1, -0.5, 0;
+    ArrayXd d_search(7);// = ArrayXd::LinSpaced(7,-6,6);
+    d_search << -4,-3,-1.5,0,1.5,3,4;//
+
+    return INTERNAL::generate_(ego, cars, sM, road, d_search, sd_search);
   };
 
   /* Generate the best trajectory for ego using the SearchMode while preventing
   collisions with the cars. If no trajectory is found, then false is returned;
   otherwise, true is returned.
   */
-  bool generate(Vehicle& ego, vector<Vehicle> const& cars, SearchMode const& SM) {
-    return INTERNAL::generate_(ego, cars, SM, d_, dsd_);
+  bool generate(Vehicle& ego, vector<Vehicle> const& cars, SearchMode const& SM, RoadMap const& road) {
+    return INTERNAL::generate_(ego, cars, SM, road, d_, dsd_);
   };
 };
 
