@@ -24,9 +24,9 @@ using namespace std;
 using json = nlohmann::json;
 
 double TIME_STEP = 0.02;
-double REPLANNING_TIME = 0.3;
-double PLAN_HORIZON = 1;
-double CONSIDER_DISTANCE = 150;
+double REPLANNING_TIME = 0.2;
+double PLAN_HORIZON = 1.5;
+double CONSIDER_DISTANCE = 50;
 
 // For converting back and forth between radians and degrees.
 constexpr double pi() { return M_PI; }
@@ -80,7 +80,7 @@ int main() {
 
   auto start_time = start_timer();
 
-  h.onMessage([&road, &cars, &ego, &end_traj, &start_time](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&road, &ego, &cars, &end_traj, &start_time](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -107,7 +107,9 @@ int main() {
           double t_end = N * TIME_STEP;
           double t = stop_timer(start_time);
 
-          cout << "   s = " << car_s << endl;
+          // cout << "   s = " << car_s << " , d = " << car_d << "  :   N_sensor = " << sensor_fusion.size()<< endl;
+
+          // map<int, Vehicle> cars;
 
           // Update all cars
           for (auto& car : sensor_fusion) {
@@ -115,12 +117,15 @@ int main() {
             int id = car[0];
             if (cars.count(id) == 0) cars[id] = Vehicle(id); // create the car
 
+            double s = car[5];
+            double d = car[6];
 
+            double kappa = road.curvature(s);
             // Add the cars measurment - in frenet
             // NOTE: velocity transofrm is missing factor with curvature.
-            Matrix2d M = road.TransformMat_C2F(car[5]);
+            Matrix2d M = road.TransformMat_C2F(s);
             Vector2d v = M * (Vector2d() << car[3], car[4]).finished();
-            cars[car[0]].new_measurment({car[5],car[6],v(0),v(1)}, t); // the car already has been added
+            cars[car[0]].new_measurment({s,d,v(0)/(1-kappa*d),v(1)}, t); // the car already has been added
           }
 
           vector<double> path_x;
@@ -142,22 +147,17 @@ int main() {
               car_yaw = deg2rad(car_yaw);
               Vector2d v_xy = (Vector2d()<< cos(car_yaw), sin(car_yaw)).finished() * car_speed * 0.44704; // [m/s]
               Vector2d v_sd = M * v_xy; // Convert to Frenet
+              double kappa = road.curvature(car_s);
 
               /* Get ego's trajecotry. Note, in this case the state (position,
               speed, acceleration), are the coefficients of the trajectory,
               since the acceleration is assumed 0. */
-              Vector3d s_state = (Vector3d()<< car_s, v_sd(0), 0).finished();
+              Vector3d s_state = (Vector3d()<< car_s, v_sd(0)/(1-kappa*car_d), 0).finished();
               Vector3d d_state = (Vector3d()<< car_d, v_sd(1), 0).finished();
               ego.set_trajectory({Trajectory(s_state), Trajectory(d_state)});
 
-              // cout << "Initializing ego ..." << endl;
-              // ego.display();
-              // cout << endl;
             } else {
               ego.set_trajectory(end_traj);
-              // cout << "Using last known ego location ..." << endl;
-              // ego.display();
-              // cout << endl;
             }
             ego.t0 = 0;
 
@@ -185,6 +185,8 @@ int main() {
                 near_cars.push_back(car);
               }
             }
+
+            // cout << "Num near cars : " << near_cars.size() << endl;
 
             /* Predict a new trajectory for ego.
             At this time, just use reactive-trajectory generation and skip
@@ -254,20 +256,6 @@ int main() {
             path_x = previous_path_x;
             path_y = previous_path_y;
           }
-
-
-
-          // next_x_vals.clear();
-          // next_y_vals.clear();
-          // for (int i = 0; i< 50; ++i) {
-          //   auto xy = road.getXY(car_s+i, 6);
-          //   next_x_vals.push_back(xy[0]);
-          //   next_y_vals.push_back(xy[1]);
-          // }
-
-          // for (int i=0; i<next_x_vals.size(); ++i) {
-          //   cout << next_x_vals[i] << "\t" << next_y_vals[i] << endl;
-          // }
 
           // assert(2==0);
 

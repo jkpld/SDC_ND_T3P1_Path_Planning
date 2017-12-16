@@ -28,6 +28,7 @@ classdef CarSim < handle
         fps
         lane_nums
         current_time
+        aM_info
         
         history_x = []
         history_y = []
@@ -40,12 +41,17 @@ classdef CarSim < handle
         
         Safty_Margin = [0.5,0.5];
         min_collision_free_dist
+        
+        
+        frames
+        frame_period = nan;
+        f_counter = 1;
     end
     
     
     methods
         function obj = CarSim(cars, ego)
-            
+            cars.Length
             try close(findobj('Type','Figure','Name','CarSim')), catch, end
             obj.fig = figure('Position',[300 630 1600 300],'Name','CarSim');
             obj.ax = axes('Parent',obj.fig,'Units','norm','Position',[0,0.15,1,0.85]);
@@ -82,7 +88,7 @@ classdef CarSim < handle
             else
                 obj.cars = cars;
             end
-            
+            cars.Length
             obj.carc = line(nan,nan,'Marker','o','MarkerFaceColor','r','LineStyle','none');
             obj.carbbox = line(nan,nan,'color','r');
             obj.carbboxSM = line(nan,nan,'color',[0.3,0,0],'LineStyle','--');
@@ -94,7 +100,7 @@ classdef CarSim < handle
             obj.egobboxSM = line(nan,nan,'color',[0,0,0.3], 'LineStyle','--');
             obj.egoc = line(nan,nan,'Marker','o','MarkerFaceColor','b');
             obj.ego_traj = line(nan,nan,'color',[0,0.8,0]);
-            
+            sqrt(([cars.Length]/2).^2 +([cars.Width]/2).^2)
             obj.min_collision_free_dist = sqrt(([cars.Length]/2).^2 +([cars.Width]/2).^2) + sqrt((ego.Length/2)^2 + (ego.Width/2)^2);
             
             % Create a text box for displaying messages
@@ -103,6 +109,8 @@ classdef CarSim < handle
             obj.egoInfo_s = text(0,0,'','FontSize',10, 'VerticalAlignment','middle','HorizontalAlignment','right');
             obj.egoInfo_a = text(0,0,'','FontSize',10, 'VerticalAlignment','middle','HorizontalAlignment','right');
             obj.egoInfo_j = text(0,0,'','FontSize',10, 'VerticalAlignment','middle','HorizontalAlignment','right');
+            
+            obj.aM_info = text(0,0,'','FontSize',10, 'VerticalAlignment','baseline','HorizontalAlignment','left');
             
             for i = num_lanes:-1:1
                 lane_ns(i) = text(0,(i-0.5)*lane_width, sprintf('%d',i), 'FontSize', 16,'VerticalAlignment','middle','HorizontalAlignment','right');
@@ -117,7 +125,7 @@ classdef CarSim < handle
             setTheme(gcf,'dark')
         end
         
-        function [collide, ego_pose, ego_path_xy, cars, other_paths] = advance(obj, ego_path_xy, other_paths)
+        function [collide, ego_pose, ego_path_xy, cars, other_paths] = advance(obj, ego_path_xy, other_paths, SM)
 
             if obj.FPSclock == -1
                 obj.FPSclock = tic;
@@ -179,6 +187,15 @@ classdef CarSim < handle
             obj.egobboxSM.YData = bboxSM([1:end,1],2);
             egox = x;
             egoy = y;
+            
+            if ~isempty(SM) 
+                aM = SM.activeModes;
+                names = [aM.name];
+
+                obj.aM_info.String = strrep(names.join(", "),"_", " ");
+                obj.aM_info.Position(1:2) = [egox - obj.ego.Length/2, y + obj.ego.Width/2];
+            else
+            end
             
             % Update axis x-lims
             obj.ax.XLim = x + [0, diff(obj.ax.YLim)*1600/300] -20;
@@ -266,8 +283,8 @@ classdef CarSim < handle
             FPS = 1/toc(obj.FPSclock);
             obj.FPS_hist(mod(ceil(obj.t/obj.dt), obj.history_size)+1) = FPS;
             obj.fps.Position(1:2) = [obj.ax.XLim(1), obj.ax.YLim(2) - 0.14*diff(obj.ax.YLim)];
-            obj.fps.String = sprintf('FPS = %0.0f',mean(obj.FPS_hist));
-            
+%             obj.fps.String = sprintf('FPS = %0.0f',mean(obj.FPS_hist));
+            obj.fps.String = '';
             
             obj.FPSclock = tic;
 %             drawnow;
@@ -275,10 +292,20 @@ classdef CarSim < handle
                 drawnow;
             end
             
-            
+            if isfinite(obj.frame_period)
+                if mod(obj.counter,obj.frame_period) == 0
+%                 if mod(obj.t,obj.frame_period) < 0.01
+fprintf('CAPTURING FRAME -----------------------------------\n');
+                    drawnow;
+                    f = getframe(obj.fig);
+                    obj.frames{obj.f_counter} = frame2im(f);
+                    obj.f_counter = obj.f_counter + 1;
+                end
+            end
             
             % Update the time for the next call
             obj.t = obj.t + obj.dt;
+            obj.counter = obj.counter + 1;
             
         end
         
@@ -362,14 +389,29 @@ classdef CarSim < handle
             end
         end
         
+        function record(obj,total_count, hz)
+            total_time = total_count*obj.dt;
+            period = floor(1/(hz*obj.dt))*obj.dt;
+            fprintf('Using period of %0.3f\n', period)
+            num_frames = floor(total_time / period);
+            obj.frames = cell(1,num_frames);
+            obj.frame_period = round(period/obj.dt);
+            obj.f_counter = 1;
+            
+        end
+        
         function reset(obj)
             % Reset the simulations (car states and history)
+            obj.counter = 1;
             obj.t = 0;
             obj.update_car_states();
             obj.history_x = [];
             obj.history_y = [];
             obj.ego_loc = [obj.ego.state.x(1), obj.ego.state.y(1), 0];
             obj.FPS_hist = [];
+            
+            obj.frames = cell(1,0);
+            obj.frame_period = nan;
         end
     end
 end

@@ -12,9 +12,9 @@ classdef Trajectory
     methods
         function obj = Trajectory(coef, state_at_T, T)
             
-            % Note: polynomials will not be stored in matlab's way, but as
+            % Note: polynomials will be stored in matlab's way, but as
             % follows
-            % A(x) = a(1) + a(2)*x + a(3)*x^2 + ... = a(i)*x^(i-1)
+            % A(x) = a(i) + a(i-1)*x + a(i-2)*x^2 + ... = a(n-i)*x^(i)
             
             if nargin == 0
                 obj.coef1 = 0;

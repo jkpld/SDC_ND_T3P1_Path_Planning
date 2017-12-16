@@ -28,7 +28,10 @@ classdef BehaviorModule
             obj.trajGen = trajGen;
         end
         
-        function [obj, prop_ego, collide, other_egos] = PlanPath(obj, ego, cars, Q)
+        function [obj, prop_ego, collide, other_egos, sM] = PlanPath(obj, ego, cars, Q)
+%             [collide, prop_ego] = obj.trajGen.reactive_layer(ego, cars, Q);
+%             other_egos = [];
+%             return;
             
             % Initialize Goal_Lane, if not yet initialized.
             if obj.Goal_Lane == -1
@@ -176,6 +179,7 @@ classdef BehaviorModule
                 obj.Goal_Lane = search_modes(idx).goal_lane;
     %             send(Q,obj.Goal_Lane)
                 collide = all_collide;
+                sM = search_modes(idx);
             end
 %             if collide
 %                 [collide, ego] = obj.trajGen.reactive_layer(ego, cars, Q);

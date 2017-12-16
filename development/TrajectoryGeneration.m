@@ -4,12 +4,12 @@ classdef TrajectoryGeneration
         
         kj = 1;
         kt = 10;
-        ks = 10;
-        ksd = 4;
-        kd = 200;
+        ks = 100;
+        ksd = 400;
+        kd = 20000;
         
         
-        k_lat = 1;
+        k_lat = 0.1;
         k_lon = 1;
         
         % Safty_Margin added to the car sizes when determining if there is
@@ -46,49 +46,53 @@ classdef TrajectoryGeneration
         end       
         
         function [collide, ego, dt] = reactive_layer(obj, ego, cars, Q)
-            start = tic;
-            send(Q,' ---------  In Reactive layer!  ------------')
-            % Construct the car trajectories for collision detection.
-            t = (0:0.1:obj.Reactive_Layer_Time_Horizon).';
-            Nt = numel(t);
-            Nc = numel(cars);
-            car_traj = zeros(Nt,2,Nc);
-            for car_idx = Nc:-1:1
-                t0 = cars(car_idx).t0;
-                [x,y] = cars(car_idx).location(t+t0);
-                car_traj(:,1,car_idx) = x;
-                car_traj(:,2,car_idx) = y;
-            end
-            
-            % Get the minimum distance at which there cannot be a
-            % collision
-            min_collision_free_dist = ([cars.Length]/2).^2 +([cars.Width]/2).^2 + (ego.Length/2)^2 + (ego.Width/2)^2;
-            
-            % Detect if there will be a collision
-            collide = detect_collision(obj, ego, cars, car_traj, t, min_collision_free_dist);
-%             send(Q, collide)
+%             start = tic;
+%             send(Q,' ---------  In Reactive layer!  ------------')
+%             % Construct the car trajectories for collision detection.
+%             t = (0:0.1:obj.Reactive_Layer_Time_Horizon).';
+%             Nt = numel(t);
+%             Nc = numel(cars);
+%             car_traj = zeros(Nt,2,Nc);
+%             for car_idx = Nc:-1:1
+%                 t0 = cars(car_idx).t0;
+%                 [x,y] = cars(car_idx).location(t+t0);
+%                 car_traj(:,1,car_idx) = x;
+%                 car_traj(:,2,car_idx) = y;
+%             end
+%             
+%             % Get the minimum distance at which there cannot be a
+%             % collision
+%             min_collision_free_dist = ([cars.Length]/2).^2 +([cars.Width]/2).^2 + (ego.Length/2)^2 + (ego.Width/2)^2;
+%             
+%             % Detect if there will be a collision
+%             collide = detect_collision(obj, ego, cars, car_traj, t, min_collision_free_dist);
+% %             send(Q, collide)
 %             if collide
                 % If there a collision was detected, then search for a new
                 % trajectory to try and avoid it
-                min_speed = inf;
-                for i = 1:Nc
-                    if cars(i).state.x(2) < min_speed
-                        min_speed = cars(i).state.x(2);
-                    end
+                mean_speed = 0;
+                for i = 1:numel(cars)
+                    mean_speed = mean_speed + cars(i).state.x(2);
                 end
-                activeModes(1) = ActiveMode("velocity_keeping", min_speed);
-                activeModes(2) = ActiveMode("stopping", min_speed*1);
+                mean_speed = mean_speed/numel(cars);
+                activeModes(1) = ActiveMode("velocity_keeping", 21);
+%                 activeModes(2) = ActiveMode("stopping", min_speed*1);
 %                 activeModes = struct('name',"velocity_keeping",'data',min_speed);
 %                 activeModes(2).name = "stopping";
 %                 activeModes(2).data = min_speed*1;
-                d_search = -7:1:7;
+                d_search = -6:2:6;
                 
-                [ego, collide] = generate(obj, Q, ego, cars, activeModes, 2, d_search);
+                sd_search = [(mean_speed - 21) + (-4:2:4), -2,0];
+                
+                obj.T = 1:4;
+                [ego, collide] = generate(obj, Q, ego, cars, activeModes, 2, d_search, sd_search);
+                obj.T = 1:1:3;
 %             end
-            dt = toc(start);
+              dt = 0;
+%             dt = toc(start);
         end
         
-        function [ego, collide] = generate(obj, Q, ego, cars, activeModes, goal_lane, lateral_search_values)
+        function [ego, collide] = generate(obj, Q, ego, cars, activeModes, goal_lane, lateral_search_values, sd_vals)
             state0 = ego.state;
             tic
             
@@ -99,6 +103,9 @@ classdef TrajectoryGeneration
             if nargin < 7
                 lateral_search_values = obj.d;
             end
+            if nargin < 8
+                sd_vals = obj.dsd;
+            end
 %             send(Q, obj.d)
 %             send(Q, lateral_search_values)
 %             send(Q, (goal_lane - 0.5) * obj.lane_width + lateral_search_values)
@@ -107,6 +114,7 @@ classdef TrajectoryGeneration
             costs_d = costs_d(is_valid_d);
             Nd = numel(costs_d);
             if Nd == 0
+                disp("no valid lateral trajs")
                 collide = true;
                 return
             end
@@ -114,19 +122,19 @@ classdef TrajectoryGeneration
             for i = numel(activeModes):-1:1
                 switch activeModes(i).name
                     case "following"
-                        [trajs_s_i, costs_s_i, is_valid_s] = following(obj, state0, activeModes(i).data.state);
+                        [trajs_s_i, costs_s_i, is_valid_s] = following(obj, state0, activeModes(i).data.state,Q);
                         trajs_s{i} = trajs_s_i(is_valid_s);
                         costs_s{i} = costs_s_i(is_valid_s);
                     case "merging"
-                        [trajs_s_i, costs_s_i, is_valid_s] = merging(obj, state0, activeModes(i).data(1), activeModes(i).data(2));
+                        [trajs_s_i, costs_s_i, is_valid_s] = merging(obj, state0, activeModes(i).data(1), activeModes(i).data(2),Q);
                         trajs_s{i} = trajs_s_i(is_valid_s);
                         costs_s{i} = costs_s_i(is_valid_s);
                     case "stopping"
-                        [trajs_s_i, costs_s_i, is_valid_s] = stopping(obj, state0, activeModes(i).data);
+                        [trajs_s_i, costs_s_i, is_valid_s] = stopping(obj, state0, activeModes(i).data,Q);
                         trajs_s{i} = trajs_s_i(is_valid_s);
                         costs_s{i} = costs_s_i(is_valid_s);
                     case "velocity_keeping"
-                        [trajs_s_i, costs_s_i, is_valid_s] = velocity_keeping(obj, state0, activeModes(i).data);
+                        [trajs_s_i, costs_s_i, is_valid_s] = velocity_keeping(obj, state0, activeModes(i).data, sd_vals, Q);
                         trajs_s{i} = trajs_s_i(is_valid_s);
                         costs_s{i} = costs_s_i(is_valid_s);
                 end
@@ -136,6 +144,7 @@ classdef TrajectoryGeneration
             
             Ns = numel(costs_s);
             if Ns == 0
+                disp("no valid lon trajs")
                 collide = true;
                 return
             end
@@ -304,7 +313,7 @@ classdef TrajectoryGeneration
 %             T = T(is_valid);
         end
         
-        function [trajs, costs, is_valid] = following(obj, state0, slv)
+        function [trajs, costs, is_valid] = following(obj, state0, slv,Q)
             % FOLLOWING Compute trajectoy for following a car, slv, with a
             % starting position s0.
             %
@@ -324,10 +333,10 @@ classdef TrajectoryGeneration
             slv_d = [0, polyder(slv)];
             st = slv - ([0, 0, obj.D0] + obj.tau * slv_d);
 
-            [trajs, costs, is_valid] = following_merging_stoping(obj, s0, st, "following");
+            [trajs, costs, is_valid] = following_merging_stoping(obj, s0, st, "following",Q);
         end
         
-        function [trajs, costs, is_valid] = merging(obj, state0, sa, sb)
+        function [trajs, costs, is_valid] = merging(obj, state0, sa, sb,Q)
             % MERGING Compute trajectory for merging between two cars, sa
             % and sb, with a starting position s0.
             %
@@ -342,10 +351,10 @@ classdef TrajectoryGeneration
             % sb = [xb, vb, ab];
             st = (sa + sb)/2;
             st = [0.5*st(3), st(2), st(1)]; % st(t) = x + v*t + 0.5*a*t^2
-            [trajs, costs, is_valid] = following_merging_stoping(obj, s0, st, "merging");
+            [trajs, costs, is_valid] = following_merging_stoping(obj, s0, st, "merging",Q);
         end
         
-        function [trajs, costs, is_valid] = stopping(obj, state0, s_end)
+        function [trajs, costs, is_valid] = stopping(obj, state0, s_end,Q)
             % STOPPING Compute trajectory for stopping at location s_end
             % with starting position s0.
             %
@@ -355,14 +364,14 @@ classdef TrajectoryGeneration
             
             % stop at point s_end
             st = [0, 0, s_end];
-            [trajs, costs, is_valid] = following_merging_stoping(obj, s0, st, "stopping");
+            [trajs, costs, is_valid] = following_merging_stoping(obj, s0, st, "stopping",Q);
         end
         
-        function [trajs, costs, is_valid] = velocity_keeping(obj, state0, s_d)
+        function [trajs, costs, is_valid] = velocity_keeping(obj, state0, s_d, sd_vals, Q)
             
             s0 = state0.x;
             
-            dsd = s_d + obj.dsd;
+            dsd = s_d + sd_vals;
             dsd(dsd>obj.MAX_SPEED) = [];
             [dsd,T] = meshgrid(dsd , obj.T);  %#ok<*PROPLC>
             dsd = dsd(:);
@@ -428,7 +437,7 @@ classdef TrajectoryGeneration
             coefs = polyint(coefs, s0(1));
         end
         
-        function [trajs, costs, is_valid] = following_merging_stoping(obj, s0, s_target, type)
+        function [trajs, costs, is_valid] = following_merging_stoping(obj, s0, s_target, type, Q)
             % FOLLOWING_MERGING_STOPPING Compute trajectory for the three
             % strategies, following, merging, and stoping.
             %
@@ -455,7 +464,7 @@ classdef TrajectoryGeneration
                   
                 coefs(i,:) = JMT(obj, s0, s1, T(i));
                 costs(i) = ComputeCost(obj, coefs(i,:), T(i), s1, s_target, type);
-                is_valid(i) = ComputeValidity(obj, coefs(i,:), T(i));
+                is_valid(i) = ComputeValidity(obj, coefs(i,:), T(i), Q);
                 trajs(i) = Trajectory(coefs(i,:),s1,T(i));
             end
             
@@ -466,19 +475,19 @@ classdef TrajectoryGeneration
         
         function cost = following_merging_stopping_cost(obj, T, s1, target)
             % longitudinal position difference cost
-            cost = obj.ks * (s1(1) - polyval(target,T))^2;% + 100*(1-s1(2)/obj.MAX_SPEED).^2;% + 500/((s1(2)/10)^2+0.001);
+            cost = (s1(1) - polyval(target,T))^2;% + 100*(1-s1(2)/obj.MAX_SPEED).^2;% + 500/((s1(2)/10)^2+0.001);
         end
         
         function cost = velocity_keeping_cost(obj, s1, target_v)
             % velocity difference cost
-            cost = obj.ks * (s1(2) - target_v)^2;
+            cost = (s1(2) - target_v)^2;
         end
         
         function cost = lateral_cost(obj, d1)
             % lateral position difference cost 
             % Note! d1 should be relative to the current lane center.
-%             cost = obj.ks * (mod(d1(1),obj.lane_width)-obj.lane_width/2)^2;
-            cost = obj.ks * d1(1)^2;
+            cost = (mod(d1(1),obj.lane_width))^2;
+%             cost = d1(1)^2;
         end
         
         function cost = ComputeCost(obj, coefs, T, s1, target, type)
@@ -505,30 +514,19 @@ classdef TrajectoryGeneration
             
         end
         
-        function is_valid = ComputeValidity(obj, coefs, T, is_lateral)
-            if nargin < 4
-                is_lateral = 0;
-            end
+        function is_valid = ComputeValidity(obj, coefs, T, Q)
+
             is_valid = true(numel(T),1);
             max_vals = [obj.MAX_SPEED, obj.MAX_ACCEL, obj.MAX_JERK];
 
             for i = 1:numel(T)
                 p = polyder(coefs(i,:));
                 
-                if is_lateral
-                    r = roots(p);
-                    r(r<0 | r>T(i)) = [];
-                    d = abs(polyval(coefs(i,:), [r; 0; T(i)]));
-                    if any((d<obj.MIN_D) | (d>obj.MAX_D))
-                        is_valid(i) = false;
-                        continue;
-                    end
-                end
-                
                 for j = 1:3
                     pp = polyder(p);
                     r = roots(pp);
                     r(r<0 | r>T(i)) = [];
+
                     v = abs(polyval(p, [r; 0; T(i)]));
                     if any(v>max_vals(j))
                         is_valid(i) = false;

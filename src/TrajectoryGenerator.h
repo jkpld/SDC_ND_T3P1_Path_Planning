@@ -44,7 +44,7 @@ namespace JMTG {
   double ksd = 40; // weight for the difference in s-dot-coordinate cost
   double kd = 2000; // weight for the difference in d-coordinate cost
 
-  double k_lat = 10; // weight for lateral trajectories
+  double k_lat = 5; // weight for lateral trajectories
   double k_lon = 1; // weight for longitudinal trajectories
 
   /* Safty_margin - This will be used to ensure the cars do not collide
@@ -146,10 +146,10 @@ namespace JMTG {
       return coef;
     };
 
-    bool compute_validity(VectorXd const& coefs, double T) {
+    bool compute_1d_validity(VectorXd const& coefs, double T, Mode mode) {
       // Determine if a trajectory is valid by ensuring that the speed,
       // acceleration, and jerk are all below the maximum allowed values.
-      if (DEBUG <= 1) cout << "--------------- compute_validity ----------------" << endl;
+      if (DEBUG <= 1) cout << "--------------- compute_1d_validity ----------------" << endl;
       ArrayXf max_vals(3);
       max_vals << Max_Speed*1.1, Max_Accel, Max_Jerk;
       if (DEBUG <= 1) cout << "   Coefs : " << coefs.transpose() << endl;
@@ -161,6 +161,30 @@ namespace JMTG {
       // valid; so, return false.
       VectorXd p = polyder(coefs);
       if ((p.array().abs() < tol).all()) return true; // If all values are zero, then it is valid.
+
+      if (mode == Mode::LATERAL) {
+        // Check to make sure the car is always within [Min_D, Max_D]
+        VectorXd r = realRoots(p);
+        double max_val = Min_D;
+        double min_val = Max_D;
+        for (size_t ri=0 ; ri<r.size(); ++ri) {
+          if (r(ri) <0 || r(ri) > T) continue;
+          double val = polyval(coefs, r(ri));
+          max_val = std::max(max_val, val);
+          min_val = std::min(min_val, val);
+        }
+        double val = polyval(coefs,0);
+        max_val = std::max(max_val, val);
+        min_val = std::min(min_val, val);
+        val = polyval(coefs,T);
+        max_val = std::max(max_val, val);
+        min_val = std::min(min_val, val);
+
+        if (min_val <= Min_D || max_val >= Max_D) {
+          return false;
+        }
+      }
+
 
       if (DEBUG <= 1) cout << "   1st derivative : " << p.transpose() << endl;
       for (size_t j=0; j<3; ++j) {
@@ -251,7 +275,7 @@ namespace JMTG {
           s1(0) += ds_(dsi);
 
           auto coefs = JMT(s0, s1, T_(ti));
-          if (!compute_validity(coefs, T_(ti))) continue;
+          if (!compute_1d_validity(coefs, T_(ti), mode)) continue;
 
           costs.push_back(compute_cost(coefs,T_(ti), s1, target, mode));
           trajs.push_back(Trajectory(coefs, s1, T_(ti)));
@@ -286,7 +310,7 @@ namespace JMTG {
           d1 << d(di), 0, 0;
 
           auto coefs = JMT(d0, d1, T_(ti));
-          if (!compute_validity(coefs, T_(ti))) continue;
+          if (!compute_1d_validity(coefs, T_(ti), Mode::LATERAL)) continue;
 
           costs.push_back(compute_cost(coefs,T_(ti), d1-dg, Trajectory(), Mode::LATERAL));
           trajs.push_back(Trajectory(coefs, d1, T_(ti)));
@@ -355,7 +379,7 @@ namespace JMTG {
           s1 << 0, s_dot(si), 0;
 
           auto coefs = JMT_vel_keep(s0, s1, T_(ti));
-          if (!compute_validity(coefs, T_(ti))) continue;
+          if (!compute_1d_validity(coefs, T_(ti), Mode::VELOCITY_KEEPING)) continue;
 
           s1(0) = polyval(coefs,T_(ti));
           costs.push_back(compute_cost(coefs,T_(ti), s1, target, Mode::VELOCITY_KEEPING));
@@ -365,14 +389,13 @@ namespace JMTG {
 
     };
 
-    bool detect_collision(Vehicle& ego, vector<Vehicle> const& cars, MatrixXd car_traj, VectorXd t, VectorXd min_collision_free_dist, RoadMap const& road){
+    bool compute_2d_validity(Vehicle& ego, vector<Vehicle> const& cars, MatrixXd car_traj, VectorXd t, VectorXd min_collision_free_dist, RoadMap const& road){
 
-      if (DEBUG <= 1) cout << "----------------- detect_collision -----------------" << endl;
+      if (DEBUG <= 1) cout << "----------------- compute_valididty_2d -----------------" << endl;
       // NOTE: I am using just axis aligned bounding box instead of the exact
       // bounding box. Switch to object aligned bounding box by chaning this flag
       // to true;
       bool OA_DETECTION = true;
-
       int Nc = cars.size();
       int Nt = t.size();
 
@@ -391,20 +414,28 @@ namespace JMTG {
         kappa(i) = road.curvature(s_dat(0));
       }
 
-      if ( (((1 - kappa *ego_d.array())*ego_vs).square() + ego_vd.square() > 0.997*Max_Speed*Max_Speed).any()) {
+      // Reject trajectrories that have to large of a speed.
+      // s^2 = (1-kappa*d)^2*s_dot^2 + d_dot^2
+      if ( (((1 - 1.07*kappa *ego_d.array())*ego_vs).square() + ego_vd.square() > 0.997*Max_Speed*Max_Speed).any()) { // the 1.05 is an extra safty factor
         if (DEBUG <= 2) cout << "  Adjust speed over limit!" << endl;
         return true;
       }
 
-      MatrixXd ego_traj = ego.location_Eig(t);
+      // Collision detection ------------------------------------------------
+      // - Get the distance vector between ego and the other cars, and the
+      // distance.
+      // MatrixXd ego_traj = ego.location_Eig(t);
       MatrixXd dist(Nt,Nc);
+      ArrayXXd dloc(Nt*Nc,2);
+
       for (int ci=0; ci<Nc; ++ci) {
         // Lognitudinal distance using any correction.
         ArrayXd dx = car_traj.block(ci*Nt,0,Nt,1) - ego_s;
+        ArrayXd dy = car_traj.block(ci*Nt,1,Nt,1) - ego_d;
         dx = dx.unaryExpr(lonDistCorrection);
 
-        // Lateral distance.
-        ArrayXd dy = car_traj.block(ci*Nt,1,Nt,1) - ego_d;
+        dloc.block(ci*Nt,0,Nt,1) = dx;
+        dloc.block(ci*Nt,1,Nt,1) = dy;
 
         // Normalized distance between cars.
         dist.col(ci) = (dx*dx + dy*dy) / min_collision_free_dist(ci);
@@ -428,25 +459,22 @@ namespace JMTG {
         for (int ct_i=0; ct_i<idx.size(); ++ct_i) {
           int ti,ci;
           ind2sub(Nt,idx[ct_i],ti,ci);
-          // Translate to have ego at 0,0
-          Vector2d d = car_traj.row(ci*Nt+ti) - ego_traj.row(ti);
-          // Correct longitudinal distance.
-          d(0) = lonDistCorrection(d(0));
           // Create the two bounding boxes.
           Rectangle rec1 = ego.bounding_box(t(ti), Vector2d::Zero(2), 2*Safty_Margin);
-          Rectangle rec2 = cars[ci].bounding_box(t(ti), d, 2*Safty_Margin);
+          Rectangle rec2 = cars[ci].bounding_box(t(ti), dloc.row(ci*Nt+ti), 2*Safty_Margin);
           // Check if they overlap
           if (rec1.overlap(rec2, OA_DETECTION)) {
-            if (DEBUG <= 2) {
+            if (DEBUG <= 2) cout << "       Collision detected" << endl;
+            if (DEBUG <= 1) {
 
               cout << "        ___________________________" << endl;
               cout << "       | Collision detected" << endl;
               cout << "       |   ego bbox :" << endl;
-              cout << "       |      center = " << Vector2d::Zero(2) << endl;
+              cout << "       |      center = 0 0" << endl;
               cout << "       |      x_vert = " << rec1().row(0) << endl;
               cout << "       |      y_vert = " << rec1().row(1) << endl;
               cout << "       |   car bbox :" << endl;
-              cout << "       |      center = " << d << endl;
+              cout << "       |      center = " << dloc.row(ci*Nt+ti) << endl;
               cout << "       |      x_vert = " << rec2().row(0) << endl;
               cout << "       |      y_vert = " << rec2().row(1) << endl;
               cout << "       |__________________________" << endl;
@@ -463,6 +491,7 @@ namespace JMTG {
       vector<Trajectory> trajs_d, trajs_s;
       vector<double> costs_d, costs_s;
       State state0 = ego.state;
+      vector<Trajectory> traj0 = ego.trajectory;
 
       // Search for the lateral trajectory
       lateral(state0, SM.goal_lane, search_d, trajs_d, costs_d);
@@ -519,7 +548,6 @@ namespace JMTG {
             cout << "      end   : " << trajs_s[i].state_at(trajs_s[i].knot).transpose() << endl;
             cout << "      cost  : " << costs_s[i] << endl;
           }
-
         }
       }
 
@@ -548,7 +576,7 @@ namespace JMTG {
         // collisions.
 
         if (DEBUG <= 2) cout << "Starting search for best traj without collisions -" << endl;
-        int Nt = ceil(Time_Horizon / 0.2) + 1;
+        int Nt = ceil(Time_Horizon / 0.3) + 1;
         int Nc = cars.size();
         if (DEBUG <= 1) cout << "   Nt = " << Nt << endl;
         if (DEBUG <= 1) cout << "   Nc = " << Nc << endl;
@@ -557,7 +585,7 @@ namespace JMTG {
 
         // Construct the car trajectories for collision detection and the minimum
         // distance between ego and each car at which there cannot be a collision
-        VectorXd t = VectorXd::LinSpaced(Nt,0,Nt-1) * 0.2; // set the times to check for collisions
+        VectorXd t = VectorXd::LinSpaced(Nt,0,Nt-1) * 0.3; // set the times to check for collisions
         MatrixXd car_traj(Nc*Nt, 2); // initialize matrix for storing car paths
         ArrayXd min_collision_free_dist(Nc);
 
@@ -582,14 +610,15 @@ namespace JMTG {
           ego.set_trajectory({trajs_s[si], trajs_d[di]});
 
           // Detect collisions
-          collide = detect_collision(ego, cars, car_traj, t, min_collision_free_dist, road);
+          collide = compute_2d_validity(ego, cars, car_traj, t, min_collision_free_dist, road);
           if (!collide) break;
         }
 
         // If all trajectories collide, then set ego's state back to its starting
         // state and return false.
         if (collide) {
-          ego.set_state(state0);
+          // ego.set_state(state0);
+          ego.set_trajectory(traj0);
           return false;
         }
       }
@@ -599,15 +628,25 @@ namespace JMTG {
   };
 
   bool reactive(Vehicle& ego, vector<Vehicle> const& cars, RoadMap const& road) {
+
     double v_ref = Max_Speed * 0.97;
+    // Get mean car speed.
+    if (!cars.empty()) {
+      double mean_speed = 0;
+      for (auto& v : cars) mean_speed += v.state.x(1);
+      mean_speed /= cars.size();
+
+      v_ref = std::min(mean_speed + 5, v_ref);
+    }
+
     ActiveMode aM(Mode::VELOCITY_KEEPING, v_ref);
     SearchMode sM(aM, 2);
 
 
     ArrayXd sd_search(12); // = ArrayXd::LinSpaced(12,-20,2);
-    sd_search << -17.5, -15, -12.5, -10, -7.5, -6, -4.5, -3, -2, -1, -0.5, 0;
-    ArrayXd d_search(7);// = ArrayXd::LinSpaced(7,-6,6);
-    d_search << -4,-3,-1.5,0,1.5,3,4;//
+    sd_search << -15, -12.5, -10, -7.5, -6, -4.5, -3, -2, -1, -0.5, 0, 1;
+    ArrayXd d_search(3);// = ArrayXd::LinSpaced(7,-6,6);
+    d_search << -4,0,4;//
 
     return INTERNAL::generate_(ego, cars, sM, road, d_search, sd_search);
   };

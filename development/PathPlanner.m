@@ -49,7 +49,7 @@ classdef PathPlanner
             state_y = state_d; % road is straight
         end
         
-        function [path_xy, other_paths, OO] = GeneratePath(OO, ego_pose, path_xy, cars, other_paths)
+        function [path_xy, other_paths, OO, sM] = GeneratePath(OO, ego_pose, path_xy, cars, other_paths, sM)
             
             pointsRemaining = size(path_xy,1);
             t_end = pointsRemaining * OO.Time_Step;
@@ -102,7 +102,7 @@ classdef PathPlanner
                 end
                 
                 
-                [OO.behavior, prop_ego, collide, other_trajs] = OO.behavior.PlanPath(OO.ego, cars, OO.Q);
+                [OO.behavior, prop_ego, collide, other_trajs, sM] = OO.behavior.PlanPath(OO.ego, cars, OO.Q);
                 send(OO.Q, sprintf('Goal lane : %d\,', OO.behavior.Goal_Lane))
                 
 %                 [ego1_s, ego1_d] = OO.ego.generate_states(OO.Behavior_Horizon);

@@ -26,13 +26,12 @@ private:
   int ID;
   double Length;
   double Width;
-  double t0_;
 
 public:
   State state;
   vector<Trajectory> trajectory;
   double t0; // Time at which the state and trajectory are defined relative t0.
-
+  double t0_; // time of last update.
   // Constructor, Destructor
   Vehicle() : Vehicle(0, 4.8, 1.8) {};
   Vehicle(int id) : Vehicle(id, 4.8, 1.8) {};
@@ -87,6 +86,13 @@ public:
       y << m[1], m[3], 0;
     } else {
       // update state_xy acceleration
+      if (fabs(m[0] - state.x(0)) > 5 || fabs(m[1] - state.y(0)) > 5) {
+        cout << " ====" << endl;
+        cout << " ====" << endl;
+        cout << " ====  ERROR  :  car jumped by  d = " << sqrt(pow(m[0] - state.x(0),2) + pow(m[1]-state.y(0),2)) << endl;
+        cout << " ====" << endl;
+        cout << " ====" << endl;
+      }
       x << m[0], m[2], (m[2] - state.x(1))/dt;
       y << m[1], m[3], (m[3] - state.y(1))/dt;
     }
