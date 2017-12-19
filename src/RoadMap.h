@@ -137,6 +137,7 @@ public:
 
   double RoadLength;
   double lane_width; // [m]
+  int num_lanes;
   std::function<double(double)> lonDistCorrection;
 
   RoadMap(string map_file) : RoadLength(6945.554),
@@ -145,7 +146,8 @@ public:
                                     while (ds > RoadLength/2) ds -= RoadLength;
                                     return ds;
                                   }),
-                             lane_width(4)
+                             lane_width(4),
+                             num_lanes(3)
   {
     LoadWaypoints(map_file);
   }

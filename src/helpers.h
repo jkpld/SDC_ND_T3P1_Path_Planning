@@ -109,7 +109,8 @@ struct ActiveMode {
   vector<State> state;
   double number;
 
-  ActiveMode(Mode mode, State state) : mode(mode), state({state}), number(0) {};
+  ActiveMode() : ActiveMode(Mode::VELOCITY_KEEPING, 0) {};
+  // ActiveMode(Mode mode, State state) : mode(mode), state({state}), number(0) {};
   ActiveMode(Mode mode, vector<State> state) : mode(mode), state(state), number(0) {};
   ActiveMode(Mode mode, double number) : mode(mode), number(number), state({State()}) {};
 
@@ -122,17 +123,42 @@ struct SearchMode {
   double goal_lane;
   double min_lv_speed = -1;
 
-
+  SearchMode() : SearchMode(vector<ActiveMode>(0), -1, -1) {};
   SearchMode(ActiveMode aM, double gl) : SearchMode(vector<ActiveMode>(1,aM), gl, -1.0) {};
   SearchMode(vector<ActiveMode> aMs, double gl) : SearchMode(aMs, gl, -1.0) {};
   SearchMode(ActiveMode aM, double gl, double mlv_s) : SearchMode(vector<ActiveMode>(1,aM), gl, mlv_s) {};
   SearchMode(vector<ActiveMode> aMs, double gl, double mlv_s) : activeModes(aMs), goal_lane(gl), min_lv_speed(mlv_s) {};
+
+  void display() const {
+    cout << "Search Mode " << endl;
+    for (auto& aM : activeModes) {
+      switch (aM.mode) {
+        case Mode::FOLLOWING:
+          cout << "   FOLLOWING :" << endl;
+          aM.state[0].display();
+          break;
+        case Mode::MERGING:
+          cout << "   MERGING :" << endl;
+          aM.state[0].display();
+          aM.state[1].display();
+          break;
+        case Mode::STOPPING:
+          cout << "   STOPPING : " << aM.number << endl;
+          break;
+        case Mode::VELOCITY_KEEPING:
+          cout << "   VELOCITY_KEEPING : " << aM.number << endl;
+          break;
+      }
+    }
+    cout << "   Goal lane : " << goal_lane << endl;
+  }
 };
 
 void ind2sub(int const& size1, int const& idx, int& v1, int& v2) {
   v1 = idx % size1;
   v2 = (idx - v1)/size1;
 }
+
 
 
 vector<size_t> sort_outer_sum(const vector<double> &v, const vector<double> &v2) {
@@ -151,6 +177,15 @@ vector<size_t> sort_outer_sum(const vector<double> &v, const vector<double> &v2)
        });
 
   return idx;
+}
+
+template <typename T>
+vector<T> select_index(vector<T>& v, VectorXi& idx) {
+  vector<T> v2(idx.size());
+  for (size_t i=0; i<idx.size(); ++i){
+    v2[i] = v[idx(i)];
+  }
+  return v2;
 }
 
 class Rectangle {

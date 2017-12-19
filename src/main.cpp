@@ -14,7 +14,7 @@
 #include "json.hpp"
 
 #include "helpers.h"
-#include "TrajectoryGenerator.h"
+#include "BehaviorModule.h"
 #include "Vehicle.h"
 #include "RoadMap.h"
 
@@ -24,9 +24,9 @@ using namespace std;
 using json = nlohmann::json;
 
 double TIME_STEP = 0.02;
-double REPLANNING_TIME = 0.2;
-double PLAN_HORIZON = 1.5;
-double CONSIDER_DISTANCE = 50;
+double REPLANNING_TIME = 0.5;
+double PLAN_HORIZON = 2.5;
+double CONSIDER_DISTANCE = 30;
 
 // For converting back and forth between radians and degrees.
 constexpr double pi() { return M_PI; }
@@ -70,17 +70,19 @@ int main() {
   // Initialize road
   RoadMap road("../data/highway_map.csv");
 
-  // Update JMTG lonDistCorrection function to be the same as our road's (which,
-  // makes the road periodic.).
-  JMTG::lonDistCorrection = road.lonDistCorrection;
-
   map<int, Vehicle> cars;
   Vehicle ego(0);
   vector<Trajectory> end_traj;
 
+  // Update JMTG lonDistCorrection function to be the same as our road's (which,
+  // makes the road periodic.).
+  double goal_speed = 20.2;
+  // CONSIDER_DISTANCE = goal_speed * PLAN_HORIZON;
+  BehaviorModule behavior(ego, PLAN_HORIZON, REPLANNING_TIME, CONSIDER_DISTANCE, goal_speed, road);
+
   auto start_time = start_timer();
 
-  h.onMessage([&road, &ego, &cars, &end_traj, &start_time](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&road, &ego, &cars, &behavior, &end_traj, &start_time](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -161,39 +163,25 @@ int main() {
             }
             ego.t0 = 0;
 
-            ArrayXXd ego_loc(3,2);
-            ego_loc.row(0) << car_s, car_d;
-            ego_loc.block<2,2>(1,0) = ego.location_Eig((Vector2d()<<0, PLAN_HORIZON).finished());
-
-            /* Predict car locations now, at REPLANNING_TIME and at
-            REPLANNING_TIME + PLAN_HORIZON. Any car within CONSIDER_DISTANCE of
-            ego at any of the three times will be used when generating
-            trajectories for collision avoidance. */
+            // Move all cars forward in time to correspond to ego.
             vector<Vehicle> near_cars;
             for (auto& v : cars) {
-              ArrayXXd car_loc = v.second.location_Eig((Vector3d()<<0, REPLANNING_TIME, REPLANNING_TIME + PLAN_HORIZON).finished());
-
-              ArrayXd dist_s = car_loc.col(0) - ego_loc.col(0);
-              dist_s = dist_s.unaryExpr(road.lonDistCorrection);
-
-              if ((dist_s.abs() < CONSIDER_DISTANCE).any()) {
-                // Move the car forward in time to REPLANNING_TIME, and add it to our
-                // near cars.
-                Vehicle car = v.second;
-                car.set_state(car.state_at(REPLANNING_TIME));
-                car.t0 = 0;
-                near_cars.push_back(car);
-              }
+              Vehicle car = v.second;
+              car.set_state(car.state_at(REPLANNING_TIME));
+              car.t0 = 0;
+              near_cars.push_back(car);
             }
-
-            // cout << "Num near cars : " << near_cars.size() << endl;
 
             /* Predict a new trajectory for ego.
             At this time, just use reactive-trajectory generation and skip
             the behavioral planning parts. This will likely lead to recless
             driving, but it should hopefully pass the project. */
-            bool success = JMTG::reactive(ego, near_cars, road);
-            cout << "Successful trajectory generation? " << success << endl;
+            auto tic = start_timer();
+            // bool success = JMTG::reactive(ego, near_cars, road);
+            cout << "---------------- Start Planning -----------------" << endl;
+            bool success = behavior.PlanPath(ego, near_cars);
+            auto toc = stop_timer(tic);
+            cout << "Successful trajectory generation? " << success << " (" << t << "/" << toc << ")" << endl;
 
             // ego.display();
 
@@ -225,11 +213,8 @@ int main() {
               idx0 = idx[0];
             }
 
-            // cout << "constructing path" << endl;
             // Construct the new path points.
             // - first get all previous points for idx < idx[0]
-
-
             for (size_t i=0; i<idx0; ++i) {
               path_x.push_back(previous_path_x[i]);
               path_y.push_back(previous_path_y[i]);
@@ -255,6 +240,8 @@ int main() {
           } else {
             path_x = previous_path_x;
             path_y = previous_path_y;
+
+
           }
 
           // assert(2==0);
@@ -266,7 +253,7 @@ int main() {
 
         	auto msg = "42[\"control\","+ msgJson.dump()+"]";
 
-        	//this_thread::sleep_for(chrono::milliseconds(1000));
+        	this_thread::sleep_for(chrono::milliseconds(200));
         	ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
 
         }

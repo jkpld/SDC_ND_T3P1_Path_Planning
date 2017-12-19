@@ -5,14 +5,12 @@ Self-Driving Car Engineer Nanodegree Program
 ## Overview
 In this project, I implemented the method outlined in the paper "Optimal Trajectory Generation for Dynamic Street Scenarios in the Frenet Frame" by Moritz Werling, Julius Ziegler, Soren Kammel, and Sebastian Thrun, (2010). This method will be discussed below.
 
-I first, created a simulator in Matlab to develop the code. The simulator allows for reproducible scene construction, which greatly eases testing. Using matlab I created the trajectory generation and behavioral planning modules, along with a reactive layer module.
-
-The matlab code was then ported over to c++, and in the end, I only used the reactive layer to pass the project, without having to implement the behavioral planning module.
+I first, created a simulator in Matlab to develop the code. The simulator allows for reproducible scene construction, which greatly eases testing. Using matlab I created the trajectory generation and behavioral planning modules, along with a reactive layer module. The matlab code was then ported over to c++.
 
 More detailed methods are described below and a description of the code is provided at the bottom.
 
 ### Result
-The car successfully drives without incident (observed for ~30 min), though, since it is only using the reactive layer, it is sometimes a bit reckless.
+The car successfully drives without incident.
 
 ![Alt Text](/images/IMG_3406.JPG)
 
@@ -28,6 +26,12 @@ The validity of the individual lateral and longitudinal trajectories are determi
 All combinations of the remaining lateral and longitudinal trajectories are then combined and sorted from lowest cost to highest cost. I then iterate through each combination and use the first combination that is valid. Validity is determined (`TrajectoryGenerator/compute_2d_validity()`) by ensuring the speed in Cartesian coordinates is below the maximum speed and by ensuring our car does not collide with any other car. Car collision is iteratively performed. First the distance between the car centers is used to rule out the possibility of collisions in most cases. When it does not rule out a collision, first the axis-aligned bounding boxes are used to determine if there is a collision; if a collision is still not ruled out, then the separating axis theorem is used to full determine if the two cars collide or not. (The axis-aligned and object-aligned bounding box collision is implemented in the `helpers/Rectangle` class.). Finally, I accept the first trajectory combination that is valid.
 
 In the main() function, I then cyclically re-plan the trajectories every 0.2 seconds.
+
+## Behavioral module
+The Behavioral planning (`BehavioralModule.h`) is very simple. If there is no car in front of us, then I use `velocity_keeping`. If there is a car in front, then I switch to `following`. If the car in front is slower than us, then I search the other lanes, using `velocity_keeping`, `following`, and `merging`. The desion of which lane to go to uses a very simple cost function based on the final speed of the trajectory, the slowest car in front of us in other lanes, and a cost for changing lanes. (`BehaviorModule/compute_cost()`).
+
+## Reactive layer
+If the behavioral module for fails to generate a trajectory that does not end up in a collision, then a reactive layer is called that searchers across all lanes with a large search grid of end speeds.
 
 ## Sensor fusion
 The car trajectories are simply estimated using the last two measurements, which allows for the acceleration to be estimated. I then assume that each car follows a constant acceleration trajectory.
@@ -45,6 +49,7 @@ When the car is the outside lane, the simulator sometimes says it goes out of th
 The code contains several header only files
 * `TrajectoryGenerator` : Contains the functions and the constants for performing jerk-minimizing-trajectory generation.
 * `Vehicle.h` : Class `Vehicle` with data properties for the car's state, and trajectory as well as methods for obtaining the car's state, trajectory, location, and bounding box as a particular time.
+* `BehaviorModule` : Computes possible trajectories based on the surrounding cars and chooses the lane that minimizes the cost.
 * `RoadMap.h` : Class `RoadMap` that stores the road's waypoints as well as a spline interpolant of the waypoints (wrapped in a piece-wise polynomial `PP`). The class contains methods for obtaining the tangential and normal unit vectors (returned as transformation matrices), and the road's curvature.
 * `polynomial.h` : A set of functions for working with polynomials. Namely, computing derivatives and integrals, polynomial multiplication, polynomial root finding (by the eigenvalues of the companion matrix), evaluating all derivatives of the polynomial at a given point, and a piece-wise polynomial class `PP`.
 * `helpers.h` : A set of functions and classes to help. `Trajectory` class for storing trajectories, `State` class for storing car states, `Rectangle` class for string rectangles an determining if they overlap or not, ...

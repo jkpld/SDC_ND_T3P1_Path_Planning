@@ -70,14 +70,14 @@ namespace JMTG {
   double Lane_Width = 4;
 
   /* Time horizons */
-  double Time_Horizon = 4; // used in checking for collisions
+  double Time_Horizon = 2; // used in checking for collisions
   double Reactive_Layer_Time_Horizon = 3;
 
   /* Properties controling the search values for the new trajectories */
-  ArrayXd T_ = ArrayXd::LinSpaced(4,1,4); // times used in searching for new trajectories
+  ArrayXd T_ = ArrayXd::LinSpaced(3,1,3); // times used in searching for new trajectories
   ArrayXd ds_ = ArrayXd::LinSpaced(11,-5,5); // offset longitudinal distances
-  ArrayXd dsd_ = ArrayXd::LinSpaced(5,-2,2); // offset speeds
-  ArrayXd d_ = ArrayXd::LinSpaced(3,-1,1); // offset lateral distances
+  ArrayXd dsd_ = ArrayXd::LinSpaced(5,-2,0); // offset speeds
+  ArrayXd d_ = ArrayXd::LinSpaced(1,0,0); // offset lateral distances
 
   /* Function for correcting the lognitudinal distance between to s-coordinates
   Ex. Car 1 has s = s1 and car 2 has s = s2. There difference is s1-s2. Pass
@@ -416,7 +416,7 @@ namespace JMTG {
 
       // Reject trajectrories that have to large of a speed.
       // s^2 = (1-kappa*d)^2*s_dot^2 + d_dot^2
-      if ( (((1 - 1.07*kappa *ego_d.array())*ego_vs).square() + ego_vd.square() > 0.997*Max_Speed*Max_Speed).any()) { // the 1.05 is an extra safty factor
+      if ( (((1 - 1.1*kappa *ego_d.array())*ego_vs).square() + ego_vd.square() > 0.995*Max_Speed*Max_Speed).any()) { // the 1.05 is an extra safty factor
         if (DEBUG <= 2) cout << "  Adjust speed over limit!" << endl;
         return true;
       }

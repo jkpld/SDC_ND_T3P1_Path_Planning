@@ -68,6 +68,10 @@ public:
     Width = width;
   }
   // Get vehicle size
+  double get_length() const {return Length;}
+  double get_width() const {return Width;}
+
+  // Get vehicle size
   Vector2d get_size() const {
     return (Vector2d()<<Length,Width).finished();
   }
