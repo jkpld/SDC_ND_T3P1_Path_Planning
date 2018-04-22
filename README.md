@@ -33,11 +33,8 @@ The Behavioral planning (`BehavioralModule.h`) is very simple. If there is no ca
 ## Reactive layer
 If the behavioral module for fails to generate a trajectory that does not end up in a collision, then a reactive layer is called that searchers across all lanes with a large search grid of end speeds.
 
-## Sensor fusion
+## Surrounding cars
 The car trajectories are simply estimated using the last two measurements, which allows for the acceleration to be estimated. I then assume that each car follows a constant acceleration trajectory.
-
-## Note
-When the car is in the outside lane, the simulator sometimes says it goes out of the lane at around s=3000 and s=5000; however, the car is inside the lane (as defined by the simulator's rendering). At these positions you can also see the other cars in the simulator cut the left lane line very tightly.
 
 ## Code
 The code contains several header only files
