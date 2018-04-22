@@ -36,14 +36,8 @@ If the behavioral module for fails to generate a trajectory that does not end up
 ## Sensor fusion
 The car trajectories are simply estimated using the last two measurements, which allows for the acceleration to be estimated. I then assume that each car follows a constant acceleration trajectory.
 
-## Reactive layer
-In this project, I just implemented the reactive layer. The reactive layer simply uses the *velocity keeping* longitudinal method with a reference speed given by the mean speed of the cars around us (`s_mean`) plus 5, or the the maximum speed, whichever is lower : `v_ref = min(s_mean+5, max_speed)`.
-
-## Result
-The car drives successfully around the track without incident (observed for ~30 min), though it behaves a bit recklessly sometimes, due to only using the reactive layer. The behavioral module implemented in matlab could be ported over to achieve smoother performance if required.
-
 ## Note
-When the car is the outside lane, the simulator sometimes says it goes out of the lane at around s=3000 and s=5000; however, the car is most definitely inside the lane (as defined by the simulator's rendering). At these positions you can also see that the other cars in the simulator cut the left lane light very tightly, while my car is the the center of the lane
+When the car is in the outside lane, the simulator sometimes says it goes out of the lane at around s=3000 and s=5000; however, the car is inside the lane (as defined by the simulator's rendering). At these positions you can also see the other cars in the simulator cut the left lane line very tightly.
 
 ## Code
 The code contains several header only files
